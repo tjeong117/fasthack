@@ -582,9 +582,24 @@ func inspectHookConfig(path string) (docStatus, string, []string) {
 	return statusOK, "installed", detail
 }
 
+// isHindsightCommand recognises our own hook entry in a config file.
+//
+// Matching on the binary's base name alone is too strict: `hindsight init`
+// writes whatever `os.Executable()` returns, so a binary built to
+// ./hindsight-bin, or installed as hindsight-v2, writes an entry doctor would
+// then report as missing — telling you to run the init you just ran. Match on
+// the `hook` subcommand as well, which is the part that is actually ours.
 func isHindsightCommand(cmd string) bool {
 	fields := strings.Fields(cmd)
-	return len(fields) > 0 && filepath.Base(fields[0]) == "hindsight"
+	if len(fields) == 0 {
+		return false
+	}
+	base := filepath.Base(fields[0])
+	if base == "hindsight" {
+		return true
+	}
+	return strings.HasPrefix(base, "hindsight") &&
+		len(fields) > 1 && fields[1] == "hook"
 }
 
 func resolveHookBinary(cmd string) (string, error) {

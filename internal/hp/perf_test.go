@@ -15,9 +15,18 @@ package hp
 // tool is worth running at all.
 //
 // The authoritative run pins the iteration count, because the large fixtures
-// take longer than the default benchtime and would otherwise be sampled once:
+// take longer than the default benchtime and would otherwise be sampled once.
+// BENCHMARKS.md reports the median of it:
 //
-//	go test ./internal/hp/ -run XXX -bench . -benchtime 10x -count 3
+//	go test ./internal/hp/ -run XXX -bench . -benchtime 10x -count 5
+//
+// The microbenchmarks below — the classifier, the key, the daemon, the memo
+// lookup — need the opposite treatment. Ten iterations of a one-microsecond
+// function measures the timer, and BenchmarkClassifyMix only reaches the whole
+// command mix after thirty-five of them, so run those at a real benchtime:
+//
+//	go test ./internal/hp/ -run XXX -count 5 \
+//	  -bench 'Classify|KeyOnly|Normalize|HookEnvelope|Fastpath|Daemon|Store'
 
 import (
 	"bufio"
@@ -111,22 +120,41 @@ const (
 	perfNodeInScope = 8
 )
 
-// perfFreshRepo discards any cached copy of a fixture and rebuilds it.
+// perfRemoveAll deletes a fixture tree, retrying briefly.
+//
+// RemoveAll over twenty thousand files intermittently returns ENOTEMPTY on
+// macOS, because something outside the test — Spotlight, a virus scanner, a
+// peer benchmark run — created an entry in a directory the walk had already
+// passed. Observed once in this suite. Retrying is the whole fix.
+func perfRemoveAll(path string) error {
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		if err = os.RemoveAll(path); err == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
+	}
+	return err
+}
+
+// perfFreshRepo discards any cached copy of a fixture so the next caller
+// rebuilds it from nothing.
 //
 // Needed by the dirty-tree benchmark, which is self-contaminating: every
 // iteration writes one loose object per changed file, so a fixture that has
-// already been measured is slower to measure again. Left cached, the number
-// depends on how many times you have run the suite, which is not a number.
+// already been measured carries the debris of every previous run.
+//
+// Best effort by design. Removing the stamp is enough to force a rebuild, and
+// perfGetRepo clears the directory itself; if either fails we measure the
+// cached fixture and say so rather than failing the suite, because fixture
+// hygiene is not worth a red build.
 func perfFreshRepo(tb testing.TB, spec perfRepoSpec) *perfRepo {
 	perfRepoMu.Lock()
 	delete(perfRepos, spec.name)
 	perfRepoMu.Unlock()
-	if err := os.RemoveAll(filepath.Join(perfFixtureRoot(tb), spec.name)); err != nil {
-		tb.Fatalf("clear fixture %s: %v", spec.name, err)
-	}
 	if err := os.Remove(perfStampPath(filepath.Join(perfFixtureRoot(tb), spec.name))); err != nil &&
 		!os.IsNotExist(err) {
-		tb.Fatalf("clear fixture stamp %s: %v", spec.name, err)
+		tb.Logf("could not invalidate fixture %s, measuring the cached one: %v", spec.name, err)
 	}
 	return perfGetRepo(tb, spec)
 }
@@ -140,7 +168,7 @@ func perfGetRepo(tb testing.TB, spec perfRepoSpec) *perfRepo {
 	root := filepath.Join(perfFixtureRoot(tb), spec.name)
 	files := perfLayout(spec.files)
 	if !perfStampMatches(root, spec) {
-		if err := os.RemoveAll(root); err != nil {
+		if err := perfRemoveAll(root); err != nil {
 			tb.Fatalf("clear stale fixture %s: %v", root, err)
 		}
 		perfBuildRepo(tb, root, spec, files)
