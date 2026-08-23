@@ -65,6 +65,13 @@ func cmdHook(args []string) error {
 		hp.Debugf("state hash failed: %v", err)
 		return nil
 	}
+	if !state.EnvComplete {
+		// Some ecosystem is in use but we could not establish what is
+		// installed. The key therefore does not cover the environment, and
+		// serving would be a guess.
+		hp.Debugf("environment not fully established; passing through")
+		return nil
+	}
 
 	cmdNorm := hp.NormalizeCommand(in.ToolInput.Command)
 	cwdRel := ws.CwdRel(in.Cwd)

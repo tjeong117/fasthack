@@ -56,6 +56,11 @@ func cmdRecord(args []string) error {
 			if !before.Equal(after) {
 				servable = false
 			}
+			// A detected ecosystem we could not read means we cannot prove the
+			// key covers the environment, so this must never be served.
+			if !after.EnvComplete {
+				servable = false
+			}
 		} else {
 			servable = false // could not prove purity, so do not claim it
 		}

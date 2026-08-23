@@ -37,6 +37,11 @@ func cmdKey(args []string) error {
 	fmt.Printf("hp-home     %s\n", hp.Home(ws.Root))
 	fmt.Printf("tree        %s\n", state.Tree)
 	fmt.Printf("env-fp      %s\n", state.EnvFP)
+	fmt.Printf("ecosystems  %v\n", ws.Ecosystems())
+	if !state.EnvComplete {
+		fmt.Printf("            WARNING: an ecosystem was detected but could not be read;\n")
+		fmt.Printf("            nothing will be served in this workspace\n")
+	}
 	fmt.Printf("elapsed     %s\n", elapsed.Round(time.Millisecond))
 	if *command != "" {
 		norm := hp.NormalizeCommand(*command)

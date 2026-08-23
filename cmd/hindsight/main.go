@@ -16,6 +16,8 @@ const usage = `hindsight - a build cache for coding agents
   hindsight verify [--limit N]              re-execute served results and diff
   hindsight stats                           print counters from the daemon
   hindsight init                            install hook config into this repo
+  hindsight doctor                          check this workspace is cacheable
+  hindsight replay <corpus>                 what a recorded trace would have saved
 
 Environment:
   HP_ENABLE=1     arm the hook (default off, so it cannot break your own session)
@@ -47,6 +49,10 @@ func main() {
 		err = cmdStats(os.Args[2:])
 	case "init":
 		err = cmdInit(os.Args[2:])
+	case "doctor":
+		err = cmdDoctor(os.Args[2:])
+	case "replay":
+		err = cmdReplay(os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Fprint(os.Stderr, usage)
 		return

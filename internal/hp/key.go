@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 )
@@ -98,16 +97,19 @@ func (w *Workspace) TreeHash() (string, error) {
 }
 
 // EnvFingerprint covers what the tree hash structurally cannot: everything
-// gitignored that still changes what a command prints. In practice that is
-// dominated by the virtualenv.
+// gitignored that still changes what a command prints. In practice that means
+// installed dependencies, which every ecosystem hides in a gitignored
+// directory of its own.
 //
 // Two worktrees with byte-identical trees and different installed packages
 // must produce different keys. That is the one hole that can make Hindsight
-// serve a wrong answer, so this is the function to be paranoid about.
+// serve a wrong answer, so this is the function to be paranoid about — and it
+// has to be paranoid for every language, not just the one we tested first.
 //
-// Cost is a readdir, about 1 ms. Deliberately not "pip freeze", which would
-// cost 300 ms on every single command.
-func (w *Workspace) EnvFingerprint() string {
+// complete is false when an ecosystem was detected but could not be read. The
+// caller must refuse to serve in that case rather than risk matching a
+// workspace whose dependencies we failed to establish.
+func (w *Workspace) EnvFingerprint() (fp string, complete bool) {
 	h := sha256.New()
 	h.Write([]byte(KeyVersion + "\x00" + runtime.GOOS + "\x00" + runtime.GOARCH + "\x00"))
 
@@ -129,48 +131,14 @@ func (w *Workspace) EnvFingerprint() string {
 		h.Write([]byte(k + "=" + v + "\x00"))
 	}
 
-	for _, d := range w.sitePackages() {
-		h.Write([]byte("pkg\x00" + d + "\x00"))
-	}
-	if cfg, err := os.ReadFile(filepath.Join(w.venvPath(), "pyvenv.cfg")); err == nil {
-		h.Write([]byte("pyvenv\x00"))
-		h.Write(cfg)
-	}
-	return hex.EncodeToString(h.Sum(nil))[:32]
+	_, complete = fingerprintEcosystems(w.Root, h)
+	return hex.EncodeToString(h.Sum(nil))[:32], complete
 }
 
-func (w *Workspace) venvPath() string {
-	if v := os.Getenv("VIRTUAL_ENV"); v != "" {
-		return v
-	}
-	return filepath.Join(w.Root, ".venv")
-}
-
-// sitePackages returns the sorted set of installed distribution directory
-// names. This is the package set, cheaply.
-func (w *Workspace) sitePackages() []string {
-	var out []string
-	libRoot := filepath.Join(w.venvPath(), "lib")
-	pythons, err := os.ReadDir(libRoot)
-	if err != nil {
-		return nil
-	}
-	for _, p := range pythons {
-		if !p.IsDir() {
-			continue
-		}
-		entries, err := os.ReadDir(filepath.Join(libRoot, p.Name(), "site-packages"))
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if n := e.Name(); strings.HasSuffix(n, ".dist-info") || strings.HasSuffix(n, ".egg-info") {
-				out = append(out, p.Name()+"/"+n)
-			}
-		}
-	}
-	sort.Strings(out)
-	return out
+// Ecosystems lists which dependency ecosystems are in use in this workspace.
+func (w *Workspace) Ecosystems() []string {
+	detected, _ := fingerprintEcosystems(w.Root, sha256.New())
+	return detected
 }
 
 // State is the workspace identity at one instant. The purity gate compares two
@@ -178,6 +146,9 @@ func (w *Workspace) sitePackages() []string {
 type State struct {
 	Tree  string `json:"tree"`
 	EnvFP string `json:"env_fp"`
+	// EnvComplete is false when some detected ecosystem could not be read.
+	// Such a state may be recorded but must never be served from.
+	EnvComplete bool `json:"env_complete"`
 }
 
 func (w *Workspace) State() (State, error) {
@@ -185,7 +156,8 @@ func (w *Workspace) State() (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	return State{Tree: tree, EnvFP: w.EnvFingerprint()}, nil
+	fp, complete := w.EnvFingerprint()
+	return State{Tree: tree, EnvFP: fp, EnvComplete: complete}, nil
 }
 
 func (s State) Equal(o State) bool { return s.Tree == o.Tree && s.EnvFP == o.EnvFP }

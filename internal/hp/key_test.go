@@ -103,9 +103,12 @@ func TestEnvFingerprintStableForSameVenv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := ws.EnvFingerprint()
+	first, complete := ws.EnvFingerprint()
+	if !complete {
+		t.Fatal("an installed venv should be fully establishable")
+	}
 	for i := 0; i < 5; i++ {
-		if got := ws.EnvFingerprint(); got != first {
+		if got, _ := ws.EnvFingerprint(); got != first {
 			t.Fatalf("fingerprint unstable: %s != %s", got, first)
 		}
 	}
