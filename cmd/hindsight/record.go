@@ -94,6 +94,21 @@ func cmdRecord(args []string) error {
 		rec.Servable = false
 	}
 
+	// Feed the duration memo so the hook can stop intercepting this command if
+	// it is reliably cheaper than the interception itself.
+	if wsErr == nil {
+		home := hp.Home(ws.Root)
+		fast := hp.LoadFastpath(home)
+		fast.Observe(rec.CmdNorm, res.DurationMS)
+		fast.Save()
+		if floor := hp.MinDurationMS(); floor > 0 && res.DurationMS < floor {
+			// Serving this could never pay for the two tree hashes a lookup
+			// costs, so keep it out of the servable index entirely.
+			rec.Servable = false
+			rec.Reason = "below the duration floor: caching costs more than it saves"
+		}
+	}
+
 	client := hp.NewClient()
 	if err := client.Record(rec); err != nil {
 		hp.Debugf("could not reach daemon to record: %v", err)

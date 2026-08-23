@@ -61,6 +61,32 @@ func Home(repoRoot string) string {
 	return filepath.Join(base, ".hindsight", repoID(repoRoot))
 }
 
+// HomeForCwd resolves the cache root without shelling out to git.
+//
+// Home() needs a repo root, and getting one properly costs two git
+// subprocesses. The fastpath memo has to be consulted before we are willing to
+// spend that, so this walks up for a .git entry instead — pure filesystem, a
+// few microseconds. Being wrong here costs a memo miss, nothing more.
+func HomeForCwd(cwd string) string {
+	if h := os.Getenv("HP_HOME"); h != "" {
+		return h
+	}
+	dir, err := filepath.Abs(cwd)
+	if err != nil {
+		return Home(cwd)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return Home(dir)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return Home(cwd)
+		}
+		dir = parent
+	}
+}
+
 func repoID(repoRoot string) string {
 	sum := sha256.Sum256([]byte(repoRoot))
 	name := filepath.Base(repoRoot)

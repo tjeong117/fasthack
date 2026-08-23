@@ -55,6 +55,18 @@ func cmdHook(args []string) error {
 		return nil
 	}
 
+	cmdNorm := hp.NormalizeCommand(in.ToolInput.Command)
+
+	// Consult the duration memo before doing anything expensive. Two tree
+	// hashes cost more than a command that reliably runs in single-digit
+	// milliseconds could ever save, so for those the cheapest correct thing is
+	// to get out of the way. One small file read, no hashing.
+	fast := hp.LoadFastpath(hp.HomeForCwd(in.Cwd))
+	if fast.KnownFast(cmdNorm, hp.MinDurationMS()) {
+		hp.Debugf("known-fast, not worth intercepting: %s", cmdNorm)
+		return nil
+	}
+
 	ws, err := hp.NewWorkspace(in.Cwd)
 	if err != nil {
 		hp.Debugf("not a git worktree: %v", err)
@@ -73,7 +85,6 @@ func cmdHook(args []string) error {
 		return nil
 	}
 
-	cmdNorm := hp.NormalizeCommand(in.ToolInput.Command)
 	cwdRel := ws.CwdRel(in.Cwd)
 	key := hp.Key(state, cwdRel, cmdNorm)
 
