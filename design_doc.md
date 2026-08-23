@@ -170,9 +170,47 @@ Shadow verification runs agent-side, because the daemon has no worktree and a re
 
 Verified against a deliberately poisoned blob: detected, reported as `CACHE_MISMATCH`, evicted, nonzero exit.
 
-## Measured
+## Measured — real agents
 
-Five agents, five worktrees, launched simultaneously on one repo, running an identical seven-command sequence. Both arms run the hook and record identically; the only variable is whether hits are served.
+Five Claude Code agents, five git worktrees, launched simultaneously on one repo with a genuine failing test suite, told to install dependencies, reproduce the failure, fix it, and re-test. Both arms run the hook and record identically; the only variable is whether hits are served.
+
+| | baseline | cached |
+|---|---|---|
+| hook-visible commands | 15 | 15 |
+| executed | 15 | 7 |
+| served | 0 | 8 (5 coalesced in flight) |
+| execution-seconds | 50.1s | 11.7s |
+| hit rate | 0% | 53.3% |
+| wall clock | 30.5s | 31.8s |
+
+**77% of execution-seconds deleted.** The cached arm's counterfactual is 47.3s against a measured baseline of 50.1s, a 5.6% gap.
+
+The decision trace is the clearest statement of what the system does:
+
+```
+a1..a5  MISS        ~0.5s each  RECORD_ONLY  uv sync --extra dev
+a2      MISS         4634ms     SERVE        uv run pytest -q
+a1,a4,a5 LEASE_WAIT  4634ms     from a2      uv run pytest -q
+a3      HIT          4634ms     from a2      uv run pytest -q
+a2      MISS         4278ms     SERVE        uv run pytest -q   (post-fix)
+a1,a5   LEASE_WAIT   4278ms     from a2      uv run pytest -q
+a3,a4   HIT          4278ms     from a2      uv run pytest -q
+```
+
+Both test rounds collapse from five executions to one. Installs correctly never enter the lease path and run in parallel.
+
+The second round is worth dwelling on: all five agents independently produced a byte-identical fix, which means a byte-identical tree, which means they share the post-fix cache entry automatically. Nobody copied anybody's patch. This is principle 3 working as intended — the consequences of an edit are shared once two agents have independently agreed on it, while the edit itself is never transferred.
+
+### Four things this experiment does not show
+
+- **Wall clock did not improve** (30.5s to 31.8s). At this scale the bottleneck is model latency, not execution, so deleted execution-seconds do not become elapsed time. The counter measures the right thing and it is not a speedup claim. Execution only dominates wall clock when the suite is minutes rather than seconds.
+- **The sample is 15 commands.** Modern agents use native Read and Edit tools for file work, so only three Bash commands per agent reach the hook. That is favourable — what remains is almost entirely the expensive class — but it is a small n.
+- **Round-two sharing depends on convergent fixes.** This bug has one obvious correct patch. A bug with several valid fixes would leave agents at different trees and the post-fix hits would disappear.
+- **The install pool is still invisible.** `uv` resolves from a warm global cache in under a second here. On a cold cache or with pip, install is the largest single pool, and it is also the case single-flight handles best.
+
+## Measured — synthetic control
+
+The same harness driven by a fixed command script rather than a model, which removes run-to-run variance so the arms are exactly comparable.
 
 | | baseline | cached |
 |---|---|---|
@@ -245,7 +283,9 @@ The negatives are the credibility.
 - **The corpus is a partial run.** 265 records against a manifest describing 736, roughly a third.
 - **11,687 is a deduplicated command count.** Raw is 12,806. Pick one, say which, never mix them.
 - **The per-class seconds in the value table are modelled, not measured.** Hit counts are real; the seconds come from hardcoded per-class costs. The live counter uses real durations from the fleet run instead.
-- **Published overlap figures match on the command string alone.** Hindsight keys on `(state, command)`, which is strictly narrower, so 26.5% is an upper bound on a proxy rather than a measurement of what we serve. Establishing the state-keyed number is the first task on the evidence track.
+- **We do not claim a wall-clock speedup.** The measured fan-out deleted 77% of execution-seconds and moved wall clock by nothing, because model latency dominated. Those are different quantities and we only claim the first.
+- **Published overlap figures match on the command string alone**, and they overstate what we can serve. Keyed the way Hindsight actually keys, on `(state, command)`, the same corpus gives 7.5% avoidable, of which only 3.6% is cross-agent — the rest is agents repeating themselves. Against 16.6% for command-string matching. The honest decay is 16.9% across the opening three commands, falling to 1.0% after step 50.
+- **That corpus measures a different population than we target.** All 25 tasks mix different models (haiku, sonnet, opus) rather than N instances of one agent, and it starts from a pre-built container so setup is nearly absent. Both make 3.6% a floor rather than an estimate, which the 53.3% measured on a real homogeneous fan-out bears out. But the gap between those two numbers is large and we do not have a principled interpolation between them.
 - **Hindsight shares observations, never decisions.** Route-sharing between agents is deliberately out of scope. The transition corpus is what would make it approachable later; this is the foundation for that idea, not a retreat from it.
 
 ## Prior art
