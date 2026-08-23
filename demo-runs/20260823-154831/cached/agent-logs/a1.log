@@ -1,0 +1,3 @@
+[a1] serve python -m pytest -q -p no:cacheprovider sympy/core/tests/test_expr.py
+[a1] serve python -m pytest -q -p no:cacheprovider sympy/core/tests/test_arit.py
+[a1] run   python -m pytest -q -p no:cacheprovider sympy/core/tests/test_numbers.py

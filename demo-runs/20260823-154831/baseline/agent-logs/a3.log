@@ -1,0 +1,3 @@
+[a3] run   python -m pytest -q -p no:cacheprovider sympy/core/tests/test_expr.py
+[a3] run   python -m pytest -q -p no:cacheprovider sympy/core/tests/test_arit.py
+[a3] run   python -m pytest -q -p no:cacheprovider sympy/core/tests/test_numbers.py

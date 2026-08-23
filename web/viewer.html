@@ -148,8 +148,23 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 }
 .panel-title{
   font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--dimmer);
-  margin:0 0 14px;font-weight:400;
+  margin:0 0 10px;font-weight:400;
 }
+.fleet-assessment{
+  display:flex;align-items:flex-start;gap:8px;margin:0 0 15px;padding:9px 10px;
+  border:1px solid var(--line);border-radius:3px;background:#080c11;
+  color:var(--dim);font-size:11px;line-height:1.35;
+}
+.fleet-assessment .fleet-mark{
+  width:7px;height:7px;border-radius:50%;margin-top:4px;flex:0 0 auto;
+  background:var(--dimmer);
+}
+.fleet-assessment.exploring{color:var(--accent);border-color:rgba(47,224,138,.28)}
+.fleet-assessment.exploring .fleet-mark{background:var(--accent)}
+.fleet-assessment.collapsed{color:var(--warn);border-color:rgba(255,68,56,.4)}
+.fleet-assessment.collapsed .fleet-mark{background:var(--warn)}
+.fleet-assessment.apart{color:var(--fg);border-style:dashed}
+.fleet-assessment.apart .fleet-mark{background:var(--fg)}
 .lane{margin-bottom:15px}
 .lane-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
 .lane-id{font-size:16px;font-weight:700;letter-spacing:.05em}
@@ -161,6 +176,10 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 .lane-bar u{background:#2c3949;flex:1;text-decoration:none}
 .lane-foot{font-size:11px;color:var(--dimmer);margin-top:4px;letter-spacing:.04em}
 .lane-foot .w{color:var(--dim)}
+.lane-state{display:flex;gap:7px;min-width:0;margin-top:4px;font-size:11px;color:var(--dim)}
+.lane-tree{flex:0 0 auto;color:var(--fg)}
+.lane-command{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lane-peers{margin-top:2px;font-size:10px;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .inflight{
   margin-top:22px;padding-top:14px;border-top:1px solid var(--line);
   font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--dimmer);
@@ -222,6 +241,11 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 .empty{padding:40px 20px;color:var(--dimmer);font-size:13px}
 
 @media (max-width:1080px){
+  header{gap:10px;padding:10px 14px}
+  .brand-sub,.controls label{display:none}
+  input[type=text]{width:170px}
+  .status{min-width:0;max-width:180px;overflow:hidden}
+  .status span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .body{grid-template-columns:1fr}
   .lanes{border-right:0;border-bottom:1px solid var(--line);max-height:190px}
   .hero{flex-direction:column;align-items:stretch;gap:22px}
@@ -294,6 +318,9 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 <div class="body">
   <aside class="lanes">
     <h2 class="panel-title">agents</h2>
+    <div class="fleet-assessment" id="fleet-assessment" aria-live="polite">
+      <i class="fleet-mark"></i><span id="fleet-assessment-text">waiting for state map</span>
+    </div>
     <div id="lanes"></div>
     <div class="inflight">in flight <b id="inflight">0</b></div>
   </aside>
@@ -308,6 +335,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
      file on disk is preferred whenever it is actually reachable. -->
 <script type="application/x-ndjson" id="fixture-data">
 {"type":"decision","record":{"v":1,"ts":1787516040.158,"agent":"a1","cmd":"git rev-parse --show-toplevel","cmd_norm":"git rev-parse --show-toplevel","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"2b960ac5ddc349fe","tree_after":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_after":"2b960ac5ddc349fe","key":"hs-v1:44e510f53463b7ef535d4587b5a02064","policy":"SERVE","reason":"read: git rev-parse","decision":"MISS","servable":true,"exit_code":0,"duration_ms":38,"stdout_blob":"sha256:616273aea9f4ed999b5f7a62d9fe9067e0b6829480aadc59b471685d0cc84fa1","stderr_blob":"sha256:d1b573dbeec8fa6eb82830f0d1786d2f64676e29b7bfa74faf20a335cb81e163","source_agent":"","verified":null}}
+{"type":"fleet","at":1787516040.2,"fleet":{"agents":[{"agent":"a1","tree":"","last_cmd":"git rev-parse --show-toplevel","commands":1,"served":0,"executed":1,"peers":[]}],"clusters":[],"converged":false,"fully_apart":false,"assessment":"not a fan-out"}}
 {"type":"decision","record":{"v":1,"ts":1787516040.348,"agent":"a2","cmd":"git rev-parse --show-toplevel","cmd_norm":"git rev-parse --show-toplevel","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"2b960ac5ddc349fe","tree_after":"","env_fp_after":"","key":"hs-v1:44e510f53463b7ef535d4587b5a02064","policy":"SERVE","reason":"read: git rev-parse","decision":"HIT","servable":false,"exit_code":0,"duration_ms":38,"stdout_blob":"sha256:faf06533cc275c0e10b94b5c6833cad39672d46215c6de8d0135dc9e8c0125af","stderr_blob":"sha256:13373d6e3944a33134128c8a20bb59238be8c5bbbed43ec639f70905a67575fe","source_agent":"a1","verified":null}}
 {"type":"decision","record":{"v":1,"ts":1787516040.378,"agent":"a3","cmd":"git rev-parse --show-toplevel","cmd_norm":"git rev-parse --show-toplevel","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"2b960ac5ddc349fe","tree_after":"","env_fp_after":"","key":"hs-v1:44e510f53463b7ef535d4587b5a02064","policy":"SERVE","reason":"read: git rev-parse","decision":"HIT","servable":false,"exit_code":0,"duration_ms":38,"stdout_blob":"sha256:faf06533cc275c0e10b94b5c6833cad39672d46215c6de8d0135dc9e8c0125af","stderr_blob":"sha256:13373d6e3944a33134128c8a20bb59238be8c5bbbed43ec639f70905a67575fe","source_agent":"a1","verified":null}}
 {"type":"decision","record":{"v":1,"ts":1787516040.448,"agent":"a4","cmd":"git rev-parse --show-toplevel","cmd_norm":"git rev-parse --show-toplevel","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"2b960ac5ddc349fe","tree_after":"","env_fp_after":"","key":"hs-v1:44e510f53463b7ef535d4587b5a02064","policy":"SERVE","reason":"read: git rev-parse","decision":"HIT","servable":false,"exit_code":0,"duration_ms":38,"stdout_blob":"sha256:faf06533cc275c0e10b94b5c6833cad39672d46215c6de8d0135dc9e8c0125af","stderr_blob":"sha256:13373d6e3944a33134128c8a20bb59238be8c5bbbed43ec639f70905a67575fe","source_agent":"a1","verified":null}}
@@ -331,6 +359,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 {"type":"decision","record":{"v":1,"ts":1787516083.4,"agent":"a5","cmd":"uv sync","cmd_norm":"uv sync","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"2b960ac5ddc349fe","tree_after":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_after":"bac6f6fd201f285e","key":"hs-v1:d0ce66375ac64e92742ff7a9e69bddf9","policy":"PASSTHROUGH","reason":"env fingerprint changed: install is not servable","decision":"PASSTHROUGH","servable":false,"exit_code":0,"duration_ms":41520,"stdout_blob":"sha256:26512f3803b64eb3dad6c59a415537fedba49e8fe5fa325246872aa7091f6e21","stderr_blob":"sha256:2494f630318f3acd2f669663ef85078948546379b7a2299f4bbd8507ce923060","source_agent":"","verified":null}}
 {"type":"decision","record":{"v":1,"ts":1787516172.2,"agent":"a1","cmd":"pytest -q","cmd_norm":"pytest -q","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"bac6f6fd201f285e","tree_after":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_after":"bac6f6fd201f285e","key":"hs-v1:7e0bc67962a3b324815a4b39cbdcb06b","policy":"SERVE","reason":"read: pytest (no writes outside .pytest_cache)","decision":"MISS","servable":true,"exit_code":1,"duration_ms":88600,"stdout_blob":"sha256:0ffc6540d15d8b67bfb37fc63e9fdf88547f62a1b95c0234765faa3ede541998","stderr_blob":"sha256:cc42c37455dd95b758ea1c90a115f74737d9401952cf33b6b2cb85dba57e5208","source_agent":"","verified":null}}
 {"type":"stats","served":12,"executed":9,"seconds_deleted":0.4,"seconds_spent":294.6,"verified":12,"divergent":0,"agents":5,"inflight":0}
+{"type":"fleet","at":1787516172.25,"fleet":{"agents":[{"agent":"a1","tree":"a17e0c54cfd6dd848f701232ff6a0409da25d6f8","last_cmd":"pytest -q","commands":5,"served":2,"executed":3,"peers":[]},{"agent":"a2","tree":"5c7c88d6b14d6006a9f73c2cf494229b9fda701b","last_cmd":"pytest -q","commands":5,"served":3,"executed":2,"peers":[]},{"agent":"a3","tree":"545de65a8377260548e0d31414f12a8e4396d60e","last_cmd":"pytest -q","commands":5,"served":3,"executed":2,"peers":[]},{"agent":"a4","tree":"415ec61f4167e38292bc64d5523fcb400fe792bf","last_cmd":"pytest -q","commands":4,"served":2,"executed":2,"peers":[]},{"agent":"a5","tree":"94bee67c25b5f3d43aaff3c85a4e080ac8b481f9","last_cmd":"pytest -q","commands":4,"served":2,"executed":2,"peers":[]}],"clusters":[["a1"],["a2"],["a3"],["a4"],["a5"]],"converged":false,"fully_apart":true,"assessment":"fully diverged: no two agents share a state, so nothing can be shared and results are not comparable"}}
 {"type":"decision","record":{"v":1,"ts":1787516172.32,"agent":"a2","cmd":"pytest -q","cmd_norm":"pytest -q","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"bac6f6fd201f285e","tree_after":"","env_fp_after":"","key":"hs-v1:7e0bc67962a3b324815a4b39cbdcb06b","policy":"SERVE","reason":"blocked on a1's lease, then served its result","decision":"LEASE_WAIT","servable":false,"exit_code":1,"duration_ms":88600,"stdout_blob":"sha256:bcc661a2bb7ec084c3ae375e8f1d0af08fd1b920e0f9fe2f0e8784339591217d","stderr_blob":"sha256:dabf88729b955e00b0448ec263389906d5a854c6038554cf1614588e430d1aed","source_agent":"a1","verified":null}}
 {"type":"decision","record":{"v":1,"ts":1787516172.35,"agent":"a3","cmd":"pytest -q","cmd_norm":"pytest -q","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"bac6f6fd201f285e","tree_after":"","env_fp_after":"","key":"hs-v1:7e0bc67962a3b324815a4b39cbdcb06b","policy":"SERVE","reason":"blocked on a1's lease, then served its result","decision":"LEASE_WAIT","servable":false,"exit_code":1,"duration_ms":88600,"stdout_blob":"sha256:bcc661a2bb7ec084c3ae375e8f1d0af08fd1b920e0f9fe2f0e8784339591217d","stderr_blob":"sha256:dabf88729b955e00b0448ec263389906d5a854c6038554cf1614588e430d1aed","source_agent":"a1","verified":null}}
 {"type":"decision","record":{"v":1,"ts":1787516172.41,"agent":"a4","cmd":"pytest -q","cmd_norm":"pytest -q","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"bac6f6fd201f285e","tree_after":"","env_fp_after":"","key":"hs-v1:7e0bc67962a3b324815a4b39cbdcb06b","policy":"SERVE","reason":"blocked on a1's lease, then served its result","decision":"LEASE_WAIT","servable":false,"exit_code":1,"duration_ms":88600,"stdout_blob":"sha256:bcc661a2bb7ec084c3ae375e8f1d0af08fd1b920e0f9fe2f0e8784339591217d","stderr_blob":"sha256:dabf88729b955e00b0448ec263389906d5a854c6038554cf1614588e430d1aed","source_agent":"a1","verified":null}}
@@ -363,6 +392,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 {"type":"decision","record":{"v":1,"ts":1787516244.862,"agent":"a5","cmd":"ruff check src/","cmd_norm":"ruff check src/","cwd_rel":"","tree_before":"94bee67c25b5f3d43aaff3c85a4e080ac8b481f9","env_fp_before":"bac6f6fd201f285e","tree_after":"94bee67c25b5f3d43aaff3c85a4e080ac8b481f9","env_fp_after":"bac6f6fd201f285e","key":"hs-v1:3dbcf36dbc7bd3b1f1ab6cf515efecbd","policy":"SERVE","reason":"tree changed since a2 recorded this","decision":"MISS","servable":true,"exit_code":0,"duration_ms":662,"stdout_blob":"sha256:0199c55079cfa196c7f34399b0a8d45db5645140a65093cb9e7e2fb3e72b65e4","stderr_blob":"sha256:42070b8f8a81276eb8301264730868bc85626ca8085538029a6a5ebc7acd2bf9","source_agent":"","verified":null}}
 {"type":"decision","record":{"v":1,"ts":1787516256.84,"agent":"a2","cmd":"pytest -q tests/test_parser.py -k nested","cmd_norm":"pytest -q tests/test_parser.py -k nested","cwd_rel":"","tree_before":"5c7c88d6b14d6006a9f73c2cf494229b9fda701b","env_fp_before":"bac6f6fd201f285e","tree_after":"5c7c88d6b14d6006a9f73c2cf494229b9fda701b","env_fp_after":"bac6f6fd201f285e","key":"hs-v1:4b0c5f83406cf7cd35bfb30772c04906","policy":"SERVE","reason":"read: pytest","decision":"MISS","servable":true,"exit_code":1,"duration_ms":3340,"stdout_blob":"sha256:7abc710a777317ae9fad1841854626561b43a88b0be553300654d7b3a3d227b9","stderr_blob":"sha256:49779c71d27e95471cf1c6a22c05cb41b2305f5ad1b508aac89c5097f3fa8852","source_agent":"","verified":null}}
 {"type":"stats","served":26,"executed":23,"seconds_deleted":405.7,"seconds_spent":333.9,"verified":26,"divergent":0,"agents":5,"inflight":1}
+{"type":"fleet","at":1787516257.0,"fleet":{"agents":[{"agent":"a1","tree":"a17e0c54cfd6dd848f701232ff6a0409da25d6f8","last_cmd":"rg -n class Parser src/","commands":11,"served":5,"executed":6,"peers":["a5"]},{"agent":"a2","tree":"5c7c88d6b14d6006a9f73c2cf494229b9fda701b","last_cmd":"pytest -q tests/test_parser.py -k nested","commands":10,"served":5,"executed":5,"in_flight":"pytest -q tests/test_parser.py -k nested","peers":["a3"]},{"agent":"a3","tree":"5c7c88d6b14d6006a9f73c2cf494229b9fda701b","last_cmd":"git diff","commands":10,"served":6,"executed":4,"peers":["a2"]},{"agent":"a4","tree":"4f19fff827cb6fd5828e99505a0f8fe2a6d95fd8","last_cmd":"ruff check src/ --fix","commands":10,"served":4,"executed":6,"peers":[]},{"agent":"a5","tree":"a17e0c54cfd6dd848f701232ff6a0409da25d6f8","last_cmd":"pytest -q tests/test_parser.py -k nested","commands":9,"served":6,"executed":3,"peers":["a1"]}],"clusters":[["a1","a5"],["a2","a3"],["a4"]],"converged":false,"fully_apart":false,"assessment":"exploring: 3 distinct states across 5 agents"}}
 {"type":"decision","record":{"v":1,"ts":1787516268.861,"agent":"a2","cmd":"git add -A && git diff --cached --stat","cmd_norm":"git add -A && git diff --cached --stat","cwd_rel":"","tree_before":"5c7c88d6b14d6006a9f73c2cf494229b9fda701b","env_fp_before":"bac6f6fd201f285e","tree_after":"aeb9ec24f9a86063e4f800a08659f77f1776c01b","env_fp_after":"bac6f6fd201f285e","key":"hs-v1:a407973f2a95610841bf4741e70820c0","policy":"PASSTHROUGH","reason":"chain: strictest segment wins (git add writes)","decision":"PASSTHROUGH","servable":false,"exit_code":0,"duration_ms":61,"stdout_blob":"sha256:7e760c84ad5c9cbcbfcb913b15c36e659ee5143d5a41e6c6b86501c6c7839094","stderr_blob":"sha256:799b78fb26ed35a4a312d8890f9058910d7ed5b3e74714867fbbf8120dd98367","source_agent":"","verified":null}}
 {"type":"decision","record":{"v":1,"ts":1787516282.01,"agent":"a4","cmd":"ruff check src/ --fix","cmd_norm":"ruff check src/ --fix","cwd_rel":"","tree_before":"415ec61f4167e38292bc64d5523fcb400fe792bf","env_fp_before":"bac6f6fd201f285e","tree_after":"4f19fff827cb6fd5828e99505a0f8fe2a6d95fd8","env_fp_after":"bac6f6fd201f285e","key":"hs-v1:dec37178a5f03aafe611fd77765ffdfd","policy":"RECORD_ONLY","reason":"tree_after != tree_before: recorded, never servable","decision":"MISS","servable":false,"exit_code":0,"duration_ms":710,"stdout_blob":"sha256:607fac72d715fcb10900847b2b6bd79bd8da9d2c4dee021d648a2cac54e37a5b","stderr_blob":"sha256:21e7b82656967b38ffb78c179f74fc55f9f399896b0b6c219ec1277683c16db7","source_agent":"","verified":null}}
 {"type":"decision","record":{"v":1,"ts":1787516292.298,"agent":"a3","cmd":"rg -n \"class Parser\" src/","cmd_norm":"rg -n \"class Parser\" src/","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"bac6f6fd201f285e","tree_after":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_after":"bac6f6fd201f285e","key":"hs-v1:c075221967a58b2846f1d7f383d574b6","policy":"SERVE","reason":"read: rg","decision":"MISS","servable":true,"exit_code":0,"duration_ms":198,"stdout_blob":"sha256:cfe6eb5c0b0464567b7f447d2f700e1f7a0e88d8d27bf611e3efdcbf5cf77881","stderr_blob":"sha256:30c60025c02bcf7e597a8872d70fc8d392a885742044b87cce8220b971268486","source_agent":"","verified":null}}
@@ -383,6 +413,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 {"type":"decision","record":{"v":1,"ts":1787516535.62,"agent":"a3","cmd":"curl -sS https://pypi.org/simple/","cmd_norm":"curl -sS https://pypi.org/simple/","cwd_rel":"","tree_before":"2370ec917f0197062d8bf5b203fbe71f93bd0db8","env_fp_before":"bac6f6fd201f285e","tree_after":"2370ec917f0197062d8bf5b203fbe71f93bd0db8","env_fp_after":"bac6f6fd201f285e","key":"hs-v1:8b146f2aff30962d73eeb7ae061d260f","policy":"PASSTHROUGH","reason":"non-hermetic: curl","decision":"PASSTHROUGH","servable":false,"exit_code":0,"duration_ms":620,"stdout_blob":"sha256:483951a90f300d26e3d72d97315b19439d0d826038359fb303977597592a38f0","stderr_blob":"sha256:6c5419401633513589ad293d77f8a87bab0561dd0b709cec2e98e6898877ff12","source_agent":"","verified":null}}
 {"type":"decision","record":{"v":1,"ts":1787516546.338,"agent":"a2","cmd":"pytest -q","cmd_norm":"pytest -q","cwd_rel":"","tree_before":"2eb9294aeec8459c7f920ef756267a8f713c6849","env_fp_before":"bac6f6fd201f285e","tree_after":"","env_fp_after":"","key":"hs-v1:7e0bc67962a3b324815a4b39cbdcb06b","policy":"SERVE","reason":"read: pytest (no writes outside .pytest_cache)","decision":"HIT","servable":false,"exit_code":1,"duration_ms":88600,"stdout_blob":"sha256:67a9bc024b10b383aa65c0d4882edf606f361dcac6b1995ba45d232b17f23724","stderr_blob":"sha256:1ca47b307e5dcd9768cb5cde8ea9a07fc331d56ef8866bd3ce3404b9f5e82a96","source_agent":"a1","verified":null}}
 {"type":"stats","served":31,"executed":35,"seconds_deleted":588.6,"seconds_spent":528.4,"verified":31,"divergent":0,"agents":5,"inflight":0}
+{"type":"fleet","at":1787516546.5,"fleet":{"agents":[{"agent":"a1","tree":"a7699bf72cb55fe39cde06d3a61ffc26e5a80041","last_cmd":"pytest -q tests/test_parser.py -k nested","commands":14,"served":6,"executed":8,"peers":["a2","a3","a4","a5"]},{"agent":"a2","tree":"a7699bf72cb55fe39cde06d3a61ffc26e5a80041","last_cmd":"pytest -q","commands":14,"served":8,"executed":6,"peers":["a1","a3","a4","a5"]},{"agent":"a3","tree":"a7699bf72cb55fe39cde06d3a61ffc26e5a80041","last_cmd":"curl -sS https://pypi.org/simple/","commands":13,"served":6,"executed":7,"peers":["a1","a2","a4","a5"]},{"agent":"a4","tree":"a7699bf72cb55fe39cde06d3a61ffc26e5a80041","last_cmd":"pytest -q","commands":13,"served":6,"executed":7,"peers":["a1","a2","a3","a5"]},{"agent":"a5","tree":"a7699bf72cb55fe39cde06d3a61ffc26e5a80041","last_cmd":"git diff --stat","commands":12,"served":5,"executed":7,"peers":["a1","a2","a3","a4"]}],"clusters":[["a1","a2","a3","a4","a5"]],"converged":true,"fully_apart":false,"assessment":"collapsed: every agent is at the same state, so this fan-out is paying N times for one search"}}
 </script>
 
 <script>
@@ -396,6 +427,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
   var BIG_HIT_MS = 5000;           // worth drawing the eye to
   var LOOP_PAUSE_MS = 4000;
   var STATS_SNAP_MS = 1000;        // see onStats
+  var FLEET_POLL_MS = 1000;
 
   var speedIdx = 2, paused = false;
 
@@ -409,6 +441,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     gapActual: $('gap-actual'), gapDeleted: $('gap-deleted'), gapPct: $('gap-pct'),
     verify: $('verify'), vServed: $('v-served'), vVerified: $('v-verified'),
     vDivergent: $('v-divergent'), vNote: $('v-note'),
+    fleetAssessment: $('fleet-assessment'), fleetAssessmentText: $('fleet-assessment-text'),
     lanes: $('lanes'), inflight: $('inflight'), feed: $('feed')
   };
 
@@ -420,7 +453,8 @@ button:hover{color:var(--fg);border-color:var(--dim)}
       deletedMs: 0, executedMs: 0,
       served: 0, executed: 0, passthrough: 0, waits: 0,
       verified: 0, divergent: 0, inflight: 0,
-      agents: {}, agentOrder: [], recordsByKey: {},
+      agents: Object.create(null), agentOrder: [], recordsByKey: Object.create(null),
+      fleet: null, fleetAgents: Object.create(null),
       reportedAgents: 0, sawStats: false
     };
   }
@@ -461,6 +495,17 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     return m + 'm' + pad(s) + 's';
   }
 
+  function escapeHTML(value) {
+    return String(value === undefined || value === null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function finiteCount(value) {
+    value = Number(value);
+    return isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+  }
+
   // --------------------------------------------------------------- render
   function render() {
     var counterfactual = state.executedMs + state.deletedMs;
@@ -494,26 +539,61 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     }
 
     el.inflight.textContent = state.inflight;
+    renderFleetAssessment();
     renderLanes();
+  }
+
+  function renderFleetAssessment() {
+    var fleet = state.fleet;
+    if (!fleet) {
+      el.fleetAssessment.className = 'fleet-assessment';
+      el.fleetAssessmentText.textContent = state.reportedAgents
+        ? 'waiting for live state map' : 'waiting for agents';
+      return;
+    }
+    var agents = Array.isArray(fleet.agents) ? fleet.agents.length : 0;
+    var clusters = Array.isArray(fleet.clusters) ? fleet.clusters.length : 0;
+    var mode = fleet.converged ? ' collapsed' : fleet.fully_apart ? ' apart'
+      : agents >= 2 && clusters > 0 ? ' exploring' : '';
+    var fallback = agents < 2 ? 'not a fan-out'
+      : fleet.converged ? 'collapsed: every agent is at the same state'
+      : fleet.fully_apart ? 'fully diverged: no agents share a state'
+      : 'exploring: ' + clusters + ' distinct states across ' + agents + ' agents';
+    el.fleetAssessment.className = 'fleet-assessment' + mode;
+    el.fleetAssessmentText.textContent = typeof fleet.assessment === 'string' && fleet.assessment
+      ? fleet.assessment : fallback;
   }
 
   function renderLanes() {
     var out = '';
     for (var i = 0; i < state.agentOrder.length; i++) {
       var id = state.agentOrder[i], a = state.agents[id];
-      var servedN = a.hit + a.wait;
-      var total = servedN + a.exec;
+      var live = state.fleetAgents[id] || null;
+      var servedN = live ? finiteCount(live.served) : a.hit + a.wait;
+      var executedN = live ? finiteCount(live.executed) : a.exec;
+      var total = servedN + executedN;
       var pct = total ? (100 * servedN / total) : 0;
+      var tree = live && typeof live.tree === 'string' && live.tree
+        ? live.tree.slice(0, 7) : 'unknown';
+      var command = live && (live.in_flight || live.last_cmd) || '';
+      var running = !!(live && live.in_flight);
+      var peers = live && Array.isArray(live.peers)
+        ? live.peers.filter(function (peer) { return typeof peer === 'string'; }) : [];
       out += '<div class="lane">'
-        + '<div class="lane-top"><span class="lane-id">' + id + '</span>'
+        + '<div class="lane-top"><span class="lane-id">' + escapeHTML(id) + '</span>'
         + '<span class="lane-nums"><span class="h">' + servedN + '</span> served '
-        + '<span class="dim">/</span> <span class="e">' + a.exec + '</span> exec</span></div>'
+        + '<span class="dim">/</span> <span class="e">' + executedN + '</span> exec</span></div>'
         + '<div class="lane-bar"><i style="width:' + pct.toFixed(1) + '%"></i><u></u></div>'
         + '<div class="lane-foot">' + (servedN ? durText(a.deletedMs) + ' deleted'
-          : a.exec ? 'no reuse yet' : 'outside cache boundary')
+          : executedN ? 'no reuse yet' : 'outside cache boundary')
         + (a.wait ? '<span class="w"> &middot; ' + a.wait + ' coalesced in flight</span>' : '')
         + (a.pass ? '<span class="w"> &middot; ' + a.pass + ' passed through</span>' : '')
-        + '</div></div>';
+        + '</div>'
+        + (live ? '<div class="lane-state"><span class="lane-tree">' + escapeHTML(tree) + '</span>'
+          + '<span class="lane-command" title="' + escapeHTML(command) + '">'
+          + (running ? 'running ' : 'last ') + escapeHTML(command || 'no command yet') + '</span></div>' : '')
+        + (peers.length ? '<div class="lane-peers">same state as ' + escapeHTML(peers.join(', ')) + '</div>' : '')
+        + '</div>';
     }
     el.lanes.innerHTML = out || (state.reportedAgents
       ? '<div class="lane-foot">aggregate history loaded &middot; per-agent details begin after connection</div>'
@@ -637,6 +717,29 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     render();
   }
 
+  function onFleet(fleet) {
+    if (!fleet || typeof fleet !== 'object') return;
+    if (fleet.agents !== null && fleet.agents !== undefined && !Array.isArray(fleet.agents)) return;
+    if (fleet.clusters !== null && fleet.clusters !== undefined && !Array.isArray(fleet.clusters)) return;
+    var agents = Array.isArray(fleet.agents) ? fleet.agents : [];
+    var clusters = Array.isArray(fleet.clusters) ? fleet.clusters : [];
+    var byAgent = Object.create(null);
+    for (var i = 0; i < agents.length; i++) {
+      var snapshot = agents[i];
+      if (!snapshot || typeof snapshot.agent !== 'string' || !snapshot.agent) continue;
+      byAgent[snapshot.agent] = snapshot;
+      agentSlot(snapshot.agent);
+    }
+    state.fleet = {
+      agents: agents, clusters: clusters,
+      converged: fleet.converged === true, fully_apart: fleet.fully_apart === true,
+      assessment: typeof fleet.assessment === 'string' ? fleet.assessment : ''
+    };
+    state.fleetAgents = byAgent;
+    state.reportedAgents = Math.max(state.reportedAgents, agents.length);
+    render();
+  }
+
   // The daemon's stats event lets a viewer that connects mid-run catch up, and
   // nothing here ever moves a counter backwards: a counter that ticks down
   // reads as a bug even when it is not.
@@ -669,6 +772,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     if (ev.type === 'stats') onStats(ev);
     else if (ev.type === 'decision' && ev.record) onDecision(ev.record);
     else if (ev.type === 'verify' && typeof ev.ok === 'boolean') onVerify(ev);
+    else if (ev.type === 'fleet' && ev.fleet) onFleet(ev.fleet);
   }
 
   function handleRaw(text) {
@@ -676,7 +780,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
   }
 
   // ------------------------------------------------------------- transport
-  var es = null, replay = null;
+  var es = null, replay = null, fleetTimer = null, connectTimer = null, fleetEpoch = 0;
 
   function setStatus(mode, text) {
     el.status.className = 'status' + (mode ? ' ' + mode : '');
@@ -684,8 +788,25 @@ button:hover{color:var(--fg);border-color:var(--dim)}
   }
 
   function teardown() {
+    fleetEpoch++;
     if (es) { es.close(); es = null; }
     if (replay) { clearTimeout(replay.timer); replay = null; }
+    if (fleetTimer) { clearInterval(fleetTimer); fleetTimer = null; }
+    if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+  }
+
+  function fetchFleet(url, epoch) {
+    fetch(url + '/agents', { cache: 'no-store' })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (fleet) { if (fleet && epoch === fleetEpoch) onFleet(fleet); })
+      .catch(function () { /* fleet context is optional; decisions stay live */ });
+  }
+
+  function startFleetPolling(url) {
+    if (fleetTimer) clearInterval(fleetTimer);
+    var epoch = fleetEpoch;
+    fetchFleet(url, epoch);
+    fleetTimer = setInterval(function () { fetchFleet(url, epoch); }, FLEET_POLL_MS);
   }
 
   function connect(url) {
@@ -701,20 +822,27 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     catch (e) { startFixture('no daemon'); return; }
 
     var opened = false;
-    var timer = setTimeout(function () {
+    connectTimer = setTimeout(function () {
       if (!opened) { teardown(); startFixture('daemon did not respond'); }
     }, CONNECT_TIMEOUT_MS);
 
-    es.onopen = function () {
-      opened = true; clearTimeout(timer);
+    function markOpened() {
+      if (opened) return;
+      opened = true;
+      if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
       setStatus('live', 'live \u00b7 ' + url);
+      startFleetPolling(url);
+    }
+
+    es.onopen = function () {
+      markOpened();
     };
     es.onmessage = function (e) {
-      if (!opened) { opened = true; clearTimeout(timer); setStatus('live', 'live \u00b7 ' + url); }
+      markOpened();
       handleRaw(e.data);
     };
     es.onerror = function () {
-      if (!opened) { clearTimeout(timer); teardown(); startFixture('daemon unreachable'); }
+      if (!opened) { teardown(); startFixture('daemon unreachable'); }
       else setStatus('', 'reconnecting \u00b7 ' + url);
     };
   }
@@ -744,8 +872,9 @@ button:hover{color:var(--fg);border-color:var(--dim)}
   }
 
   function tsOf(ev) {
-    return (ev && ev.type === 'decision' && ev.record && isFinite(ev.record.ts))
-      ? ev.record.ts : null;
+    if (ev && ev.type === 'decision' && ev.record && isFinite(ev.record.ts)) return ev.record.ts;
+    if (ev && ev.type === 'fleet' && isFinite(ev.at)) return ev.at;
+    return null;
   }
 
   function startFixture(why) {

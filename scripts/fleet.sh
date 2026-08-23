@@ -458,6 +458,27 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Pin the locale for the whole run.
+#
+# LC_ALL is in the env fingerprint's allowlist, so the PreToolUse hook and the
+# command it rewrites must observe the same value or the purity gate fails on
+# every command and nothing is ever servable.
+#
+# They do not observe the same value by default. Codex injects LC_ALL=C.UTF-8
+# into the environment of the shell it runs a tool call in, but not into the
+# environment of the hook process that inspects that tool call first. The hook
+# therefore stamps env_fp_before without LC_ALL and `hindsight record`
+# recomputes env_fp_after with it, they disagree, and the live arm records
+# three perfectly pure pytest runs as unservable. Measured, not guessed:
+# before=f7c6e6fe... after=c44ee644..., and setting LC_ALL=C.UTF-8 by hand
+# reproduces the "after" fingerprint exactly.
+#
+# Pinning it here is the right fix rather than a workaround: a measurement
+# harness should state the locale its agents run under instead of inheriting
+# whatever the agent CLI decides to inject behind the hook's back.
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+
+# ---------------------------------------------------------------------------
 # Launch — all agents at once. This is a COLD fan-out: the whole phenomenon
 # Hindsight exploits is that simultaneously-launched agents issue identical
 # commands in their first few steps. Staggering the launch would manufacture
@@ -688,7 +709,22 @@ if not windowed and records:
 served = executed = waits = 0
 served_ms = executed_ms = wait_ms = 0
 verified_true = verified_false = 0
+servable = unservable = env_drift = tree_drift = 0
+drift_example = None
 per_agent = {}
+
+
+def count_verdict(r):
+    """Tally one shadow-verification verdict. Returns True if it was one."""
+    global verified_true, verified_false
+    if r.get("verified") is True:
+        verified_true += 1
+        return True
+    if r.get("verified") is False:
+        verified_false += 1
+        return True
+    return False
+
 
 for r in windowed:
     dec = str(r.get("decision") or "")
@@ -697,21 +733,46 @@ for r in windowed:
         dur = int(r.get("duration_ms") or 0)
     except (TypeError, ValueError):
         dur = 0
+
+    # Shadow verification emits its own terminal records under a synthetic
+    # agent, rather than annotating the HIT it re-executed. Reading `verified`
+    # off HIT records alone reported verified_true=0/verified_false=0 for runs
+    # whose log held nine divergences -- a machine-readable clean bill of
+    # health that the log contradicted. Count the VERIFY records, and keep the
+    # verifier out of per_agent: it is an auditor, not a fleet member, and a
+    # sixth all-zero lane in a five-agent run reads as a bug.
+    if dec == "VERIFY":
+        count_verdict(r)
+        continue
+
     slot = per_agent.setdefault(agent, {"hit": 0, "exec": 0, "wait": 0, "deleted_ms": 0, "exec_ms": 0})
     if dec == "HIT":
         served += 1
         served_ms += dur
         slot["hit"] += 1
         slot["deleted_ms"] += dur
-        if r.get("verified") is True:
-            verified_true += 1
-        elif r.get("verified") is False:
-            verified_false += 1
+        # Still honoured for the inline form, where a verdict rides the HIT.
+        count_verdict(r)
     elif dec in EXECUTED:
         executed += 1
         executed_ms += dur
         slot["exec"] += 1
         slot["exec_ms"] += dur
+        # A MISS that is not servable teaches the cache nothing, so a run can
+        # execute everything, look healthy, and still be incapable of a hit.
+        # Separate the two reasons: the command wrote to the tree (its own
+        # fault) or the environment moved underneath it (the harness's fault).
+        if dec == "MISS":
+            if r.get("servable") is True:
+                servable += 1
+            else:
+                unservable += 1
+                if r.get("env_fp_before") != r.get("env_fp_after"):
+                    env_drift += 1
+                    if drift_example is None:
+                        drift_example = (r.get("env_fp_before"), r.get("env_fp_after"))
+                elif r.get("tree_before") != r.get("tree_after"):
+                    tree_drift += 1
     elif dec == "LEASE_WAIT":
         # A lease wait avoided an execution exactly as a hit did: the agent
         # blocked on a peer instead of duplicating the work, and never ran the
@@ -751,11 +812,25 @@ if waits:
     w("  %-38s %10.1fs" % ("  of which won by in-flight leases", wait_ms / 1000.0))
 w("  %-38s %10.1fs" % ("if every agent executed everything", counterfactual_ms / 1000.0))
 w("  %-38s %10.1f%%" % ("hit rate", hit_rate))
+verified_checked = verified_true + verified_false
+if verified_checked:
+    w("  %-38s %11d" % ("shadow-verified served results", verified_true))
+    w("  %-38s %11d" % ("  re-executed and checked", verified_checked))
 if verified_false:
     w("")
     w("  *** %d DIVERGENT served result(s) — investigate before quoting ***" % verified_false)
-elif verified_true:
-    w("  %-38s %11d" % ("shadow-verified served results", verified_true))
+if unservable:
+    w("")
+    w("  %-38s %11d" % ("recorded but NOT servable", unservable))
+    if env_drift:
+        w("    %d because the environment fingerprint moved across the" % env_drift)
+        w("    command: %s -> %s" % drift_example)
+        w("    The hook and the command it rewrote did not observe the same")
+        w("    environment, so the purity gate cannot pass. Check that every")
+        w("    variable in the fingerprint allowlist is pinned by this script")
+        w("    rather than injected by the agent CLI.")
+    if tree_drift:
+        w("    %d because the command wrote to the worktree" % tree_drift)
 if served == 0 and mode == "cached":
     w("")
     w("  note: zero hits. Check that the daemon is up and that HP_SERVE=1")
@@ -788,6 +863,11 @@ with open(json_out, "w") as fh:
             "hit_rate_pct": round(hit_rate, 2),
             "verified_true": verified_true,
             "verified_false": verified_false,
+            "verified_checked": verified_checked,
+            "servable": servable,
+            "unservable": unservable,
+            "unservable_env_drift": env_drift,
+            "unservable_tree_drift": tree_drift,
             "per_agent": per_agent,
         },
         fh,

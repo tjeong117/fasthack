@@ -1,0 +1,51 @@
+
+---------------------------------------------------------------------
+  fleet complete  ·  mode=cached  agents=5  ref=22ffbf4
+---------------------------------------------------------------------
+
+  agent    status             wall
+  a1       ok                25.0s
+  a2       ok                25.5s
+  a3       ok                26.2s
+  a4       ok                25.6s
+  a5       ok                26.2s
+
+  total wall clock (fan-out)                    26.3s
+  slowest agent                                 26.2s
+
+
+  shadow verification
+  ................................x....................................... [ 64%]
+  ..................x....................                                  [100%]
+  109 passed, 1 deselected, 2 xfailed in 1.76s
+  served 1 / verified 1 / 0 divergent
+  cache log  /tmp/hs-demo-cached-20260823-160856/log.jsonl
+  scope      this run   (28 of 28 lines)
+
+  commands agents asked for                       15
+    executed  (MISS + PASSTHROUGH)                 3
+    served    (HIT + LEASE_WAIT)                  12
+      of which coalesced in flight                12
+
+  execution-seconds spent                       7.8s
+  execution-seconds DELETED                    31.2s
+    of which won by in-flight leases           31.2s
+  if every agent executed everything           39.0s
+  hit rate                                     80.0%
+  shadow-verified served results                   5
+    re-executed and checked                       13
+
+  *** 8 DIVERGENT served result(s) — investigate before quoting ***
+
+  agent       hit   exec   wait      deleted
+  a1            0      1      2         6.1s
+  a2            0      0      3         7.8s
+  a3            0      0      3         7.8s
+  a4            0      2      1         1.7s
+  a5            0      0      3         7.8s
+
+---------------------------------------------------------------------
+  agent logs   /private/tmp/fleet-cached-20260823-160856/logs
+  summary      /private/tmp/fleet-cached-20260823-160856/summary.txt
+---------------------------------------------------------------------
+

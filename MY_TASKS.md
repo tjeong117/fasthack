@@ -1,129 +1,152 @@
 # MY_TASKS — Arnav / Teammate
 
-This file delegates only the work Tom assigns to the **Teammate** in the latest [AGENTS.md](AGENTS.md) and [PLAN.md](PLAN.md).
+This is the local execution queue for the files assigned to the **Teammate** in
+[AGENTS.md](AGENTS.md) and [PLAN.md](PLAN.md). Exactly one task is active. Finish
+its acceptance checks before promoting the next backlog item.
 
 ## Git state
 
-- Branch: `main`
-- PR base: remote `main` at `9e1fdb9`
-- Work branch: `codex/viewer-evidence-docs`
-- `git pull --rebase --autostash origin main`: already up to date
+- Work from `main`, which tracks `origin/main`.
+- Pull with rebase immediately before each push.
+- Preserve the local untracked notes `CMEM_LANE.md` and `research_notes.md`.
+- Commit only files named by the active task.
 
-Do not create or checkout another branch. The project contract says both teammates work directly on `main` with disjoint file ownership.
+## Assigned ownership
 
-## What Tom assigns to you
+| Path/work | Responsibility | Current state |
+|---|---|---|
+| `internal/hp/policy.go` + tests | Conservative classification and chain behavior | Complete; regression fixes only |
+| `internal/hp/norm.go` + tests | Stable output normalization for verification | Complete; regression fixes only |
+| `scripts/fleet.sh` | Baseline/cached harness and measured summaries | Complete; QA and provenance remain |
+| `web/viewer.html` | Live counters, provenance, verification, and presentation | Active |
+| Evidence pass | Regenerable overlap/value claims and screenshots | Generator complete; private outputs pending |
 
-| Assigned path/work | Your responsibility |
-|---|---|
-| `internal/hp/policy.go` + tests | Conservative command classification and chain behavior |
-| `internal/hp/norm.go` + tests | Stable output normalization for verification |
-| `scripts/fleet.sh` | Baseline/cached fleet harness and measured summaries |
-| `web/viewer.html` | Live counters, provenance, verification, and demo presentation |
-| Evidence pass from `PLAN.md` | Reproducible overlap/value claims and screenshots |
+Do not edit Tom's key, store, hook, record, daemon, or CLI implementation. If
+work in this queue exposes a core issue, record the exact reproducer and hand it
+to Tom.
 
-Tom owns `internal/hp/key.go`, `store.go`, `hook.go`, `record.go`, `daemon.go`, and `cmd/hindsight/main.go`. Do not edit those files. If your test exposes a core problem, hand Tom the exact reproducer.
+## Completed — Task 1: wire fleet state into the viewer
 
-## Already complete — do not redo
+Completed on `main`. The viewer polls `/agents`, consumes fleet SSE snapshots,
+renders state/command/peer context, handles nullable empty Go slices, and keeps
+fleet data separate from execution counters. Fixture and live-empty-daemon QA
+passed at desktop and compact projector widths.
 
-- Policy and normalization are implemented and tested.
-- Metadata-producing commands and descriptor-dup redirects have regression coverage.
-- Installs are excluded from the single-flight serve path.
-- Fleet baseline/cached modes work.
-- The viewer supports fixtures and live daemon events.
-- A controlled synthetic experiment has been measured.
-- A real five-agent experiment has been measured: 53.3% hit rate and 77% of execution-seconds deleted.
+### Allowed files
 
-Your work starts after implementation, at reproducibility and stage readiness.
+- `web/viewer.html`
+- `web/fixture.jsonl`
+- `MY_TASKS.md` only to record completion and promote Task 2
 
-## Task 1 — commit the evidence package
+### Inputs already available
 
-Follow [evidence/AGENTS.md](evidence/AGENTS.md). Work inside `evidence/` only for this task.
+- `GET /agents` returns `FleetView` with `agents`, `clusters`, `converged`,
+  `fully_apart`, and `assessment`.
+- Calling `/agents` also broadcasts an SSE event shaped as
+  `{"type":"fleet","fleet":{...}}`.
+- Each agent includes its tree, latest command, command/served/executed counts,
+  peers at the same tree, in-flight command, and last-seen timestamp.
 
-Create:
+### Implementation checklist
 
-- `evidence/overlap.py`
-- `evidence/overlap.json`
-- `evidence/overlap.md`
-- `evidence/value.md`
-- `evidence/claims.md`
+1. Fetch `/agents` immediately after a live SSE connection opens, then every
+   second while that connection remains active.
+2. Accept fleet SSE events and keep the latest snapshot separate from the
+   decision counters.
+3. Add one compact fleet assessment above the existing lanes.
+4. Enrich each lane with its short tree, current command, and same-state peers;
+   use fleet snapshot totals after a late connection.
+5. Escape every daemon-provided string before inserting it into HTML.
+6. Stop the poller on teardown, reconnect, or fixture playback.
+7. Treat `/agents` failure as non-fatal; do not abandon a working SSE stream.
+8. Add fixture fleet snapshots that demonstrate exploring and convergence in
+   both `web/fixture.jsonl` and the standalone embedded fixture.
 
-Required checks:
+### Acceptance
 
-1. Determine and document what `state_sha256` hashes.
-2. Reproduce or correct the state-keyed figures now quoted in `design_doc.md`: 7.5% avoidable, 3.6% cross-agent, 16.9% in the first three commands, and 1.0% after step 50.
-3. Count submission identities per task and verify the claim that all 25 multi-agent tasks mix model submissions.
-4. Regenerate the value table and label its seconds **modeled**.
-5. Keep counts explicit: 11,687 deduplicated; 12,806 raw across multi-agent tasks.
-6. Keep the unsupported correlation statistic deleted.
+- Exploring, converged, fully-apart, one-agent, and missing-tree snapshots all
+  render without breaking the decision feed.
+- Late connection populates lanes immediately and reconnecting leaves exactly
+  one fleet poller.
+- Fixture playback, pause/resume, looping, projector layout, and reduced motion
+  still work.
+- Fixture totals remain 528.4 seconds executed, 588.6 seconds deleted, and
+  1117.0 seconds counterfactual.
+- Existing PASSTHROUGH, provenance, verification, and divergence accounting
+  does not regress.
 
-Acceptance:
+### Blockers
 
-- Every published figure comes from one committed command and one documented corpus path.
-- Every table states its denominator and whether it is measured or modeled.
-- If a claim does not regenerate, the evidence file says so and the public claim is queued for correction.
+None. This task changes no backend contract.
 
-## Task 2 — document the real fleet run
+## Active — Task 2: live viewer QA and capture
 
-Tom has committed the headline results to `design_doc.md`, but the rerun recipe and raw-result provenance still need a durable home.
+### Allowed files
 
-Within your fleet/evidence lane, record:
+- Viewer/fixture presentation files only for a reproduced presentation bug
+- One screenshot and one fallback recording in an agreed evidence/demo location
+- `MY_TASKS.md` only to record completion and promote Task 3
 
-- target repository and revision;
-- exact prompt or deterministic workload;
-- exact baseline and cached commands;
-- agent count and harness;
-- cache directories and cold-start procedure;
-- raw `summary.json` values or their preserved location;
-- why baseline and cached arms differ only by serving;
-- the measured limitation that wall clock did not improve.
+### Required input
 
-Do not manufacture missing artifacts. If Tom's raw logs are not in this workspace, ask him for the paths or files and mark the task waiting.
+- A representative live five-agent daemon run, or Tom's preserved event log
 
-Acceptance: another teammate can reproduce the experiment without guessing hidden flags or environment variables.
+### Implementation checklist
 
-## Task 3 — finish the fleet interface
+1. Connect the viewer to the representative live stream.
+2. Verify HIT, MISS, LEASE_WAIT, PASSTHROUGH, source provenance, verification,
+   divergence, fleet snapshots, and late reconnect.
+3. Confirm the live totals reconcile with the preserved summary.
+4. Capture a projector-readable screenshot and a fallback recording.
+5. Change viewer code only for a reproduced presentation or accounting bug.
 
-The current shared docs still advertise `scripts/fleet.sh 5 baseline`, but that short form requires a prompt and a safe output directory that it does not supply.
+### Acceptance
 
-Coordinate one decision with Tom:
+The measured five-agent story can be presented without editing the fixture or
+explaining around a broken state, and both captured artifacts remain usable if
+the live daemon or agents fail on stage.
 
-- either make the short form truly self-contained; or
-- remove it and document the full invocation as canonical.
+### Blocker
 
-The full invocation must make these explicit:
+Waiting for a representative live daemon run or Tom's preserved log.
 
-- target repo;
-- prompt/workload;
-- agent count;
-- `baseline` or `cached` mode;
-- output directory outside the target repo;
-- cache directory when reproducibility matters.
+## Backlog — promote one only after the active task passes
 
-Only edit `scripts/fleet.sh` if the chosen interface requires it. `AGENTS.md` is shared, so change its examples only after Tom agrees.
+### Task 3: generate the final evidence outputs
 
-Acceptance: the documented baseline and cached commands both reach dry-run and create/clean their worktrees.
+**Allowed files:** `evidence/` and `MY_TASKS.md`.
 
-## Task 4 — validate the live viewer
+Run `python3 evidence/overlap.py` against the sealed replay corpus and review
+the generated `overlap.json`, `overlap.md`, `value.md`, and `claims.md`. Confirm
+7.5% avoidable, 3.6% cross-agent, 16.9% at steps 0–2, and 1.0% at step 50+ come
+from the shipping Go replay. Keep every denominator and measured/modeled label.
 
-Use a real daemon event stream, not the embedded fixture.
+**Acceptance:** one committed command regenerates every published evidence
+artifact without `n/a`, `not_tested`, or a flattering alternate method.
 
-Verify:
+**Blocker:** Tom must run the command at, or provide access to, the private
+sealed-corpus path.
 
-- HIT, MISS, LEASE_WAIT, and PASSTHROUGH display correctly;
-- each hit identifies `source_agent`;
-- execution-seconds deleted use the recorded source duration;
-- verified/divergent counts update without double-counting;
-- a divergence is visually loud;
-- reconnecting mid-run catches up correctly;
-- the viewer never blocks daemon work.
+### Task 4: preserve fleet-run provenance and demo commands
 
-Capture one screenshot or fallback recording for the submission.
+**Allowed files:** evidence/demo documentation, `scripts/fleet.sh` only if a
+reproduced interface bug requires it, and `MY_TASKS.md`.
 
-Acceptance: the viewer can tell the measured five-agent story without manual fixture edits.
+Document the target revision, prompt/workload, exact baseline and cached
+commands, agent count, output/cache directories, cold-start procedure, raw
+summary locations, expected measurements, and recovery commands. State that
+wall clock did not improve.
 
-## Task 5 — owned-file regression pass
+**Acceptance:** another teammate can reproduce both arms without guessing a
+flag or environment variable.
 
-Do not add features. Run the existing verification and change your files only for a reproduced failure.
+**Blocker:** Tom must supply any raw paths or commands that are not committed.
+
+### Task 5: Codex verification and owned-file regression
+
+**Allowed files:** assigned paths only, and only for reproduced failures.
+
+Prove Codex command rewriting under the judging permission profile, then run:
 
 ```sh
 GOCACHE=/private/tmp/fasthack-go-cache \
@@ -135,32 +158,18 @@ GOTMPDIR=/private/tmp/fasthack-go-tmp \
 go build ./cmd/hindsight
 
 bash -n scripts/fleet.sh scripts/replay-agent.sh
+python3 -m py_compile evidence/overlap.py
 git diff --check
 ```
 
-If the failure is in Tom's core, stop at the reproducer and hand it off. Do not cross ownership to fix it yourself.
+**Acceptance:** the judging-profile Codex hook is demonstrated and the full
+regression pass is green. Core failures are handed to Tom with a reproducer.
 
-## Shared final checks — coordinate, do not silently own
+## Out of scope until the queue is complete
 
-- Prove Codex command rewriting in the exact judging permission profile. The measured real run used Claude Code.
-- Reconcile `AGENTS.md` saying “hooks off” with the implemented baseline using equal instrumentation and serving disabled.
-- Update `design_doc.md` only if evidence regeneration changes a number.
-- Rehearse the three-minute demo twice and keep the claim to execution-seconds deleted, not wall-clock speedup.
-
-## Do not work on
-
-- Tom's key/store/hook/record/daemon/CLI files;
-- Claude-Mem;
-- environment restoration or install caching;
-- subtree or cross-machine caching;
-- another external corpus before the current evidence is committed;
-- expanding policy or normalization without a real failing case;
-- new dependencies.
-
-## Immediate order
-
-1. Ask Tom for the raw five-agent run artifacts and exact rerun command.
-2. Build the reproducible evidence package.
-3. Reconcile and dry-run the canonical fleet command.
-4. Validate and capture the live viewer.
-5. Run the regression suite, then coordinate the shared docs and rehearsal.
+- Claude-Mem integration
+- API/MCP response caching
+- cross-machine or subtree caching
+- environment restoration or install replay
+- new dependencies
+- decorative viewer redesigns

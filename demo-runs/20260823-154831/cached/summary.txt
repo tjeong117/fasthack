@@ -1,0 +1,63 @@
+
+---------------------------------------------------------------------
+  fleet complete  ·  mode=cached  agents=5  ref=e950d31
+---------------------------------------------------------------------
+
+  agent    status             wall
+  a1       ok                 9.8s
+  a2       ok                 9.8s
+  a3       ok                 9.8s
+  a4       ok                 9.8s
+  a5       ok                 9.8s
+
+  total wall clock (fan-out)                     9.8s
+  slowest agent                                  9.8s
+
+
+  shadow verification
+  ................................x....................................... [ 64%]
+  ..................x....................                                  [100%]
+  109 passed, 1 deselected, 2 xfailed in 1.78s
+  ........................................................................ [ 63%]
+  .........................s...............                                [100%]
+  =============================== warnings summary ===============================
+  sympy/core/tests/test_numbers.py:56
+    /private/tmp/fleet-cached-20260823-154831/verify/sympy/core/tests/test_numbers.py:56: PytestUnknownMarkWarning: Unknown pytest.mark.thread_unsafe - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+      @pytest.mark.thread_unsafe(reason="mutates process-global division error state")
+  
+  sympy/core/tests/test_numbers.py:330
+    /private/tmp/fleet-cached-20260823-154831/verify/sympy/core/tests/test_numbers.py:330: PytestUnknownMarkWarning: Unknown pytest.mark.thread_unsafe - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+      @pytest.mark.thread_unsafe(
+  
+  -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+  112 passed, 1 skipped, 2 warnings in 1.31s
+  served 2 / verified 1 / 1 divergent
+  hindsight: CACHE_MISMATCH: 1 divergent record(s) evicted
+  (divergence found — see above)
+  cache log  /tmp/hs-demo-cached-20260823-154831/log.jsonl
+  scope      this run   (27 of 27 lines)
+
+  commands agents asked for                       15
+    executed  (MISS + PASSTHROUGH)                 3
+    served    (HIT + LEASE_WAIT)                  12
+      of which coalesced in flight                12
+
+  execution-seconds spent                       8.9s
+  execution-seconds DELETED                    35.6s
+    of which won by in-flight leases           35.6s
+  if every agent executed everything           44.5s
+  hit rate                                     80.0%
+
+  agent       hit   exec   wait      deleted
+  a1            0      1      2         6.3s
+  a2            0      0      3         8.9s
+  a3            0      2      1         2.6s
+  a4            0      0      3         8.9s
+  a5            0      0      3         8.9s
+  verifier      0      0      0         0.0s
+
+---------------------------------------------------------------------
+  agent logs   /private/tmp/fleet-cached-20260823-154831/logs
+  summary      /private/tmp/fleet-cached-20260823-154831/summary.txt
+---------------------------------------------------------------------
+
