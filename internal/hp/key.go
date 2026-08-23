@@ -75,7 +75,23 @@ func (w *Workspace) TreeHash() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
 	env := append(os.Environ(), "GIT_INDEX_FILE="+w.IndexPath)
-	if _, err := git(ctx, w.Root, env, "add", "-A"); err != nil {
+
+	// Each agent normally has its own worktree and therefore its own git dir
+	// and its own side index. But two hooks can still fire concurrently in one
+	// worktree, and "git add" takes an exclusive lock on the index. Losing that
+	// race would silently downgrade to a passthrough on every concurrent
+	// command, which quietly costs most of the cache. Retry briefly instead.
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		if _, err = git(ctx, w.Root, env, "add", "-A"); err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return "", err
+		}
+		time.Sleep(time.Duration(20*(attempt+1)) * time.Millisecond)
+	}
+	if err != nil {
 		return "", err
 	}
 	return git(ctx, w.Root, env, "write-tree")
