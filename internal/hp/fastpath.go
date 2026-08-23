@@ -26,13 +26,49 @@ import (
 // expensive to consult as the thing it is avoiding.
 
 // DefaultMinDurationMS is the floor below which caching cannot pay for itself.
-// Roughly the measured hook overhead on a small repository.
-const DefaultMinDurationMS = 50
+//
+// The obvious floor is the hook's own cost, and that is what this used to be.
+// It answers the wrong question. Measured on this machine: a bare
+// `grep -rn def src/` takes 4.7 ms, the full interception path takes 52.8 ms,
+// and a command the memo already knows is cheap costs 11.2 ms — that residual
+// being Go process startup, which any hook pays and none can avoid.
+//
+// So the marginal cost of *trying* to cache, rather than passing straight
+// through, is about 42 ms. And you pay it on every miss, not every hit. The
+// break-even is therefore
+//
+//	hit_rate * duration > 42 ms
+//
+// At the 5.4% cross-agent reuse that reads actually show in the measured
+// corpus, that needs a command taking roughly 800 ms. Reads are 48.8% of all
+// commands and almost none of them are anywhere near that, so caching them is
+// net negative however cheap the cache is.
+//
+// 500 ms is deliberately conservative against the 800 ms the arithmetic
+// suggests, because hit rates are far higher than 5.4% during the opening
+// lockstep phase of a fan-out, which is where most real hits happen.
+const DefaultMinDurationMS = 500
 
 // fastpathSamples is how many observations we need before trusting a verdict.
 // One fast run of a normally-slow command (everything warm, nothing to do)
 // should not permanently disable caching for it.
-const fastpathSamples = 3
+//
+// Two is enough. Three costs a third more full-price interceptions before the
+// memo takes effect, and the downside of being wrong is only that we stop
+// caching something cheap.
+const fastpathSamples = 2
+
+// alwaysCheap are commands that cannot be slow whatever their arguments, so
+// there is no reason to pay even one full interception to discover it.
+//
+// Deliberately short. `grep` and `cat` are absent because they are cheap on a
+// small target and expensive on a large one, and the duration memo tracks the
+// exact command string, so it distinguishes `grep foo README.md` from
+// `grep -rn TODO .` where a name-based list could not.
+var alwaysCheap = map[string]bool{
+	"echo": true, "pwd": true, "true": true, "false": true, ":": true,
+	"basename": true, "dirname": true, "printf": true,
+}
 
 // MinDurationMS is the configured floor. HP_MIN_DURATION_MS overrides it, and
 // 0 disables the fastpath entirely.
@@ -76,10 +112,22 @@ func (f *Fastpath) KnownFast(cmdNorm string, floorMS int64) bool {
 	if floorMS <= 0 {
 		return false
 	}
+	if head := firstWord(cmdNorm); alwaysCheap[head] {
+		return true
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	e, ok := f.m[cmdNorm]
 	return ok && e.N >= fastpathSamples && e.MaxMS < floorMS
+}
+
+func firstWord(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] == ' ' {
+			return s[:i]
+		}
+	}
+	return s
 }
 
 // Observe records how long a command took.

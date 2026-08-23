@@ -54,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/lookup", s.handleLookup)
 	mux.HandleFunc("/record", s.handleRecord)
 	mux.HandleFunc("/release", s.handleRelease)
+	mux.HandleFunc("/agents", s.handleAgents)
 	mux.HandleFunc("/servable", s.handleServable)
 	mux.HandleFunc("/verify", s.handleVerify)
 	mux.HandleFunc("/events", s.handleEvents)

@@ -59,8 +59,30 @@ func TestFastpathCorruptFileIsEmptyNotFatal(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "fastpath.json"), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if LoadFastpath(home).KnownFast("echo hi", 50) {
+	// Probe with a command the always-cheap list does not cover, so this
+	// tests the memo rather than the static short-circuit.
+	if LoadFastpath(home).KnownFast("grep -rn TODO src/", 50) {
 		t.Fatal("a corrupt memo must behave as an empty one")
+	}
+}
+
+// TestFastpathAlwaysCheapNeedsNoEvidence: some commands cannot be slow
+// whatever their arguments, so paying even one full interception to discover
+// that is waste.
+func TestFastpathAlwaysCheapNeedsNoEvidence(t *testing.T) {
+	f := LoadFastpath(t.TempDir())
+	for _, cmd := range []string{"echo hello", "pwd", "true", "basename /a/b.txt"} {
+		if !f.KnownFast(cmd, DefaultMinDurationMS) {
+			t.Errorf("%q should skip interception without needing observations", cmd)
+		}
+	}
+	// grep and cat are deliberately absent: cheap on a small target, expensive
+	// on a large one, and the memo keys on the whole command so it can tell
+	// those apart where a name-based list cannot.
+	for _, cmd := range []string{"grep -rn TODO .", "cat huge.log"} {
+		if f.KnownFast(cmd, DefaultMinDurationMS) {
+			t.Errorf("%q must be judged on observed duration, not on its name", cmd)
+		}
 	}
 }
 
