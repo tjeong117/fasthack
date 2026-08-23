@@ -343,7 +343,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Prime the connection so a viewer that attaches late still shows totals.
-	if b, err := json.Marshal(map[string]any{"type": "stats", "stats": s.stats()}); err == nil {
+	// Same flat shape as every other stats event; a viewer should never have
+	// to special-case the first one.
+	if b, err := json.Marshal(statsEvent(s.stats())); err == nil {
 		fmt.Fprintf(w, "data: %s\n\n", b)
 		flusher.Flush()
 	}
@@ -379,15 +381,16 @@ func (s *Server) broadcast(v any) {
 	}
 }
 
-func (s *Server) broadcastStats() {
-	st := s.stats()
-	s.broadcast(map[string]any{
+func statsEvent(st Stats) map[string]any {
+	return map[string]any{
 		"type": "stats", "served": st.Served, "executed": st.Executed,
 		"seconds_deleted": st.SecondsDeleted, "seconds_spent": st.SecondsSpent,
 		"verified": st.Verified, "divergent": st.Divergent,
 		"agents": st.Agents, "inflight": st.Inflight,
-	})
+	}
 }
+
+func (s *Server) broadcastStats() { s.broadcast(statsEvent(s.stats())) }
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
