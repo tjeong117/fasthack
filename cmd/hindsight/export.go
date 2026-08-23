@@ -26,9 +26,11 @@ import (
 // enforced in hp.TransitionFrom, not here, and everything it drops is counted
 // and printed, so the exclusion is visible rather than silent.
 //
-// Needs one line in main.go:  case "export": err = cmdExport(os.Args[2:])
+// Exposed as `hindsight transitions`, not `hindsight export`: `hindsight cache
+// export` already means something unrelated (moving a warm cache between
+// machines), and two commands called export would be a trap.
 func cmdExport(args []string) error {
-	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	fs := flag.NewFlagSet("transitions", flag.ContinueOnError)
 	home := fs.String("home", "", "cache root (default from HP_HOME or the repo)")
 	out := fs.String("out", "", "output file (default stdout)")
 	format := fs.String("format", "jsonl", "output format: jsonl|json")
@@ -55,6 +57,11 @@ func cmdExport(args []string) error {
 			root = ws.Root
 		}
 		dir = hp.Home(root)
+	}
+	// Absolute, because the header is the corpus's only statement of where it
+	// came from and "./cache" says nothing once the file has been moved.
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
 	}
 	logPath := hp.StorePaths(dir).LogPath()
 
@@ -182,7 +189,7 @@ func writeExport(w io.Writer, format, dir, logPath string, filter hp.TransitionF
 }
 
 func printExportStats(w io.Writer, dir, logPath string, filter hp.TransitionFilter, stats hp.ExportStats) {
-	fmt.Fprintf(w, "hindsight export \u2014 observed state transitions\n\n")
+	fmt.Fprintf(w, "hindsight transitions \u2014 observed state transitions\n\n")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "  cache\t%s\n", dir)
 	fmt.Fprintf(tw, "  log\t%s\n", logPath)

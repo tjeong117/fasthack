@@ -6,7 +6,9 @@ Hindsight makes N parallel coding agents pay once, in total, for work that all N
 
 Fan out five coding agents on one task, in five git worktrees, and each one independently installs the same dependencies, runs the same failing test to reproduce the bug, and reads the same files. Nothing tells agent five that agent two already paid for it. In a large repo with a slow test suite, that duplicated work is the dominant cost of running agents in parallel.
 
-The redundancy is structural rather than incidental: agents given the same task start from the same state and therefore start with the same moves, and they only diverge as they learn. Measured on a corpus of replayed SWE-bench attempts, cross-agent command overlap is 26.5% across the first three commands and decays to 11.0% after step ten. The opening — the most redundant stretch — is also the stretch where every agent is doing it simultaneously.
+The redundancy is structural rather than incidental: agents given the same task start from the same state and therefore start with the same moves, and they only diverge as they learn. Measured on a corpus of replayed SWE-bench attempts, keyed the way Hindsight actually keys — on workspace state *and* command — cross-agent reuse is 16.9% across the opening three commands and decays to 1.0% after step fifty. The opening is both the most redundant stretch and the one where every agent is doing it simultaneously, which is what single-flight exists for.
+
+Earlier drafts of this document opened with 26.5% decaying to 11.0%. Those are command-string figures: they count two agents typing the same command at workspaces that have drifted apart, which is not something a cache can serve. They are quoted here only to be retracted, because the honest number is the one above and it is less than half as large.
 
 ## What it does
 

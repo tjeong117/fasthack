@@ -158,8 +158,8 @@ h4{font-size:16.5px;font-weight:650;margin:0 0 8px}
 .sec-head p b{color:var(--fg)}
 
 .grid{display:grid;gap:clamp(16px,2vw,22px)}
-.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
-.g3{grid-template-columns:repeat(auto-fit,minmax(258px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(min(100%,258px),1fr))}
 /* Grid and flex children default to min-width:auto, so one wide table or a
    nowrap pre would widen the whole document instead of scrolling inside its
    own container. Everything that can hold overflow gets an explicit floor. */
@@ -182,12 +182,12 @@ h4{font-size:16.5px;font-weight:650;margin:0 0 8px}
 .dg-row{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
 .dg-node{
   border:1px solid var(--line-2);border-radius:3px;background:var(--panel-2);
-  padding:10px 14px;min-width:132px;text-align:left;
+  padding:10px 14px;flex:1 1 132px;max-width:180px;min-width:0;text-align:left;
 }
 .dg-node .t{font-size:13.5px;font-weight:600;color:var(--fg)}
 .dg-node .c{font-size:11px;color:var(--dimmer);margin-top:3px;line-height:1.45}
 .dg-join{height:26px;display:flex;justify-content:center;align-items:center}
-.dg-join i{display:block;width:1px;height:100%;background:var(--line-2)}
+.dg-join i{display:block;width:1px;height:100%;background:#2c3949}
 .dg-key{
   display:inline-block;border:1px solid var(--accent);border-radius:3px;
   background:var(--accent-soft);color:var(--accent);padding:11px 18px;
@@ -222,7 +222,7 @@ h4{font-size:16.5px;font-weight:650;margin:0 0 8px}
 /* ------------------------------------------------------------------ tables */
 .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
 table{
-  border-collapse:collapse;width:100%;min-width:440px;
+  border-collapse:collapse;width:100%;
   font-family:var(--mono);font-size:13.5px;font-variant-numeric:tabular-nums;
 }
 caption{
@@ -232,14 +232,16 @@ caption{
 th,td{text-align:left;padding:9px 14px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--dimmer);font-weight:400;font-size:11px;letter-spacing:.14em;text-transform:uppercase}
 tbody th{color:var(--dim);font-size:13.5px;letter-spacing:0;text-transform:none;font-weight:400}
-td.n{text-align:right;padding-right:0}
-th.n{text-align:right;padding-right:0}
+td.n,th.n{text-align:right;padding-right:22px}
+td.n:last-child,th.n:last-child{padding-right:0}
 td.on{color:var(--accent);font-weight:600}
 tr.flat td,tr.flat th{color:var(--dim)}
 tr.flat td.on{color:var(--dim);font-weight:400}
+/* Only the wide tables are allowed to scroll. The two-arm result tables must
+   shrink instead: hiding the cached column behind a swipe hides the point. */
 table.trace{min-width:600px;font-size:13px}
 table.trace td:first-child{color:var(--fg)}
-table.policy{min-width:460px}
+table.env{min-width:430px}
 table.policy tbody th{color:var(--fg);white-space:nowrap}
 
 /* ------------------------------------------------------------------ verify */
@@ -269,8 +271,10 @@ table.policy tbody th{color:var(--fg);white-space:nowrap}
 .pending .metric-label{color:var(--dim)}
 .pending .prov{
   font-family:var(--mono);font-size:clamp(30px,5vw,54px);font-weight:700;
-  color:var(--dimmer);letter-spacing:.06em;line-height:1;margin:4px 0 12px;
+  color:var(--dimmer);letter-spacing:.04em;line-height:1;margin:10px 0 14px;
 }
+.pending .prov span{font-size:.44em;letter-spacing:.18em;margin-left:.7em;
+  vertical-align:middle;color:var(--dim)}
 .pending p{font-size:14.5px;color:var(--dim);max-width:62ch;margin:0}
 .pulse-dot{
   display:inline-block;width:8px;height:8px;border-radius:50%;
@@ -320,7 +324,9 @@ footer p{font-size:13.5px;color:var(--dimmer);max-width:58ch}
   .metric-value{font-size:clamp(34px,10vw,46px)}
   .verifybar .note{margin-left:0;flex:1 1 100%}
   .caveat{flex-direction:column;gap:10px}
-  th,td{padding-right:12px}
+  th,td{padding-right:10px}
+  td.n,th.n{padding-right:10px}
+  table{font-size:13px}
 }
 @media (prefers-reduced-motion:reduce){
   *{animation:none !important;transition:none !important}

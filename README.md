@@ -2,7 +2,7 @@
 
 A build cache for coding agents. When you fan out N agents on one task, Hindsight makes them pay once, in total, for the work all N would otherwise do independently.
 
-It is a cache, not a model. Nothing in it predicts anything: a served result is a byte-exact replay of a command that really ran, so the failure mode is a cache miss, never a wrong answer.
+It is a cache, not a model. Nothing in it predicts anything: a served result is a replay of a command that really ran, so the failure mode is a cache miss, never a wrong answer. It replays the recorded bytes exactly; when re-checking a served result against a fresh execution we compare *normalized* output, because test runners print durations and temp paths that legitimately differ between two correct runs.
 
 ## The problem
 

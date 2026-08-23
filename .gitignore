@@ -12,3 +12,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# release artifacts: rebuilt by `make release`, and tracking them would
+# perturb the very git tree hash the cache keys on
+/dist/

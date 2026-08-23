@@ -18,6 +18,7 @@ const usage = `hindsight - a build cache for coding agents
   hindsight init                            install hook config into this repo
   hindsight doctor                          check this workspace is cacheable
   hindsight cache export|import             move a warm cache between machines
+  hindsight transitions [--stats]           emit the observed transition corpus
   hindsight replay <corpus>                 what a recorded trace would have saved
 
 Environment:
@@ -54,6 +55,8 @@ func main() {
 		err = cmdDoctor(os.Args[2:])
 	case "cache":
 		err = cmdCache(os.Args[2:])
+	case "transitions":
+		err = cmdExport(os.Args[2:])
 	case "replay":
 		err = cmdReplay(os.Args[2:])
 	case "-h", "--help", "help":

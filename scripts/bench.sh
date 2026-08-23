@@ -429,7 +429,7 @@ seed_hit() {
 # duration memo has enough samples to start skipping it.
 seed_fast() {
 	local repo="$1" cmd="$2" wrapped i
-	for i in 1 2 3; do
+	for _ in 1 2 3; do
 		wrapped="$(rewrite_of "$repo" "$cmd")"
 		[ -n "$wrapped" ] || break
 		(cd "$repo" && sh -c "$wrapped") >/dev/null 2>&1 || true
@@ -444,6 +444,17 @@ PASSTHROUGH_CMD="curl -s https://example.invalid/health"
 FAST_CMD="echo hindsight-bench-fast"
 HIT_CMD="grep -c payload bench-data.txt"
 BARE_CMD="grep -cF payload bench-data.txt"
+
+# The harness surcharge, which is nobody's fault and everybody's cost.
+#
+# Hooks execute under a login shell. Every number below is what happens after
+# that shell has started, so the difference between these two rows is added to
+# all of them in a real session, on every command, including the ones that pass
+# straight through. It is entirely a property of the user's dotfiles.
+echo "harness floor"
+time_shell "shell-floor" "harness" "$LARGE_REPO" "true"
+time_shell "login-shell" "harness" "$LARGE_REPO" "${SHELL:-/bin/sh} -lc true"
+echo
 
 for pair in "small:$SMALL_REPO" "large:$LARGE_REPO"; do
 	name="${pair%%:*}"

@@ -113,8 +113,8 @@ const (
 	ExcludeUnknown     = "decision unrecognised: excluded by default"
 	ExcludeNoAfter     = "no observed after-state: the transition was never completed"
 	ExcludeMalformed   = "malformed: log line did not parse as a record"
-	ExcludeNonMutating = "filtered out: non-mutating (--mutating-only)"
-	ExcludeMutating    = "filtered out: mutating (--include-nonmutating=false)"
+	ExcludeNonMutating = "filtered out: non-mutating (filter=mutating-only)"
+	ExcludeMutating    = "filtered out: mutating (filter=non-mutating-only)"
 )
 
 // TransitionFrom converts one record. The second return is the reason it was

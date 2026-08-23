@@ -423,7 +423,7 @@
 
     <div class="grid g3">
       <div class="card">
-        <div class="metric-label">In the state it was recorded in</div>
+        <div class="metric-label">In the recorded state</div>
         <p>
           Shadow verification runs agent-side, because the daemon has no worktree and a replay
           only means anything in the state it was recorded in. Records whose workspace has moved
@@ -596,7 +596,7 @@
       -->
       <div class="pending">
         <div class="metric-label"><span class="pulse-dot"></span>Larger repository &mdash; running now</div>
-        <div class="prov">&mdash;&mdash;&mdash;</div>
+        <div class="prov">&mdash;&mdash;.&mdash;s <span>pending</span></div>
         <p>
           <b>Provisional: no number published.</b> A larger fan-out on a real repository is in
           flight. Nothing goes here until it has a measured baseline arm beside it, recorded with
@@ -620,9 +620,7 @@
       </p>
     </div>
 
-    <div class="grid g2" style="align-items:start">
-      <div>
-        <pre><span class="p">$</span> go build ./cmd/hindsight
+    <pre><span class="p">$</span> go build ./cmd/hindsight
 
 <span class="p">$</span> ./hindsight doctor                    <span class="c"># can this workspace be cached safely?</span>
 <span class="p">$</span> ./hindsight init                      <span class="c"># install the PreToolUse hook</span>
@@ -630,7 +628,10 @@
 
 <span class="p">$</span> <span class="on">HP_ENABLE=1</span> claude
 <span class="c"># or: </span><span class="on">HP_ENABLE=1</span> codex exec --dangerously-bypass-hook-trust</pre>
-        <p class="dim" style="font-size:14.5px;margin-top:16px">
+
+    <div class="grid g2" style="align-items:start;margin-top:clamp(20px,2.6vw,30px)">
+      <div>
+        <p class="dim" style="font-size:15px;margin-bottom:22px">
           <code>doctor</code> is the first thing to run and the first thing to run again when
           something looks wrong. It checks that the tree hash works and how much it costs, that
           every dependency ecosystem in the repo is covered by the fingerprint, that the cache
@@ -638,24 +639,24 @@
           exists. It exits non-zero if any of that fails, and <code>--json</code> gives the same
           answer to a script.
         </p>
-      </div>
-
-      <div>
-        <div class="note-card" style="margin-bottom:22px">
+        <div class="note-card">
           <div class="metric-label">The hook is inert unless HP_ENABLE=1</div>
           <p class="dim" style="font-size:15px;margin:0">
             That is deliberate: this repo installs a hook into its own config, so an armed hook
             would intercept the very session you use to work on the hook.
           </p>
         </div>
+      </div>
+
+      <div>
         <div class="scroll">
-          <table>
+          <table class="env">
             <caption>Environment</caption>
             <thead><tr><th>Variable</th><th>Default</th><th>Meaning</th></tr></thead>
             <tbody>
               <tr><th>HP_ENABLE</th><td>unset</td><td><code>1</code> arms the hook. Nothing happens without it.</td></tr>
               <tr><th>HP_SERVE</th><td>1</td><td><code>0</code> records everything and serves nothing &mdash; the control arm.</td></tr>
-              <tr><th>HP_DAEMON</th><td>127.0.0.1:7777</td><td>Shared daemon.</td></tr>
+              <tr><th>HP_DAEMON</th><td>http://127.0.0.1:7777</td><td>Shared daemon.</td></tr>
               <tr><th>HP_HOME</th><td>~/.hindsight/&lt;repo-id&gt;</td><td>Cache root. Must be outside the worktree.</td></tr>
               <tr><th>HP_AGENT</th><td>local</td><td>Agent id, used for provenance on served results.</td></tr>
               <tr><th>HP_DEBUG</th><td>unset</td><td><code>1</code> sends diagnostics to stderr. Never to stdout.</td></tr>
