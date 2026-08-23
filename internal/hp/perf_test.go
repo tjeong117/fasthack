@@ -111,6 +111,26 @@ const (
 	perfNodeInScope = 8
 )
 
+// perfFreshRepo discards any cached copy of a fixture and rebuilds it.
+//
+// Needed by the dirty-tree benchmark, which is self-contaminating: every
+// iteration writes one loose object per changed file, so a fixture that has
+// already been measured is slower to measure again. Left cached, the number
+// depends on how many times you have run the suite, which is not a number.
+func perfFreshRepo(tb testing.TB, spec perfRepoSpec) *perfRepo {
+	perfRepoMu.Lock()
+	delete(perfRepos, spec.name)
+	perfRepoMu.Unlock()
+	if err := os.RemoveAll(filepath.Join(perfFixtureRoot(tb), spec.name)); err != nil {
+		tb.Fatalf("clear fixture %s: %v", spec.name, err)
+	}
+	if err := os.Remove(perfStampPath(filepath.Join(perfFixtureRoot(tb), spec.name))); err != nil &&
+		!os.IsNotExist(err) {
+		tb.Fatalf("clear fixture stamp %s: %v", spec.name, err)
+	}
+	return perfGetRepo(tb, spec)
+}
+
 func perfGetRepo(tb testing.TB, spec perfRepoSpec) *perfRepo {
 	perfRepoMu.Lock()
 	defer perfRepoMu.Unlock()
@@ -421,12 +441,18 @@ func BenchmarkTreeHashCold(b *testing.B) {
 // `git add -A` has to stat every tracked path, but it only re-hashes what
 // moved. If the cost tracked the change count rather than the repository size,
 // a 50k-file monorepo would be as cheap as a small one between edits.
+//
+// Unlike every other benchmark here the fixture is rebuilt rather than reused,
+// because this one dirties what it measures. Each iteration leaves one loose
+// object per changed file behind, and a fixture carrying half a million of
+// them measured four times slower than a fresh one — an artefact of how often
+// the suite had been run, not of anything the hook does.
 func BenchmarkTreeHashDirty(b *testing.B) {
 	if testing.Short() {
 		b.Skip("large fixture skipped under -short")
 	}
 	const total = 20_000
-	r := perfGetRepo(b, perfRepoSpec{name: "repo-dirty", files: total})
+	r := perfFreshRepo(b, perfRepoSpec{name: "repo-dirty", files: total})
 	for _, changed := range []int{0, 1, 10, 100, 1_000, 10_000} {
 		b.Run(fmt.Sprintf("%d_changed", changed), func(b *testing.B) {
 			perfPrime(b, r)

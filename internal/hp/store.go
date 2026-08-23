@@ -35,10 +35,16 @@ type Record struct {
 	StderrBlob  string  `json:"stderr_blob"`
 	SourceAgent string  `json:"source_agent"`
 	Verified    *bool   `json:"verified"`
-	// Tier is 0 for an exact tree match and 1 when diff-disjoint scoping
-	// promoted a different tree. A judge should be able to see which hits
+	// Tier is 0 for an exact tree match, 1 when diff-disjoint scoping promoted
+	// a different tree from the command's arguments, and 2 when it promoted
+	// from an observed read set. A judge should be able to see which hits
 	// relied on the weaker argument.
 	Tier int `json:"tier"`
+	// ReadSet is what this execution was observed to read, when a wrapper
+	// could report it. Tier-2 promotion checks the diff against this instead
+	// of against the command's path arguments, which is the difference between
+	// a measurement and an inference.
+	ReadSet *ReadSet `json:"read_set,omitempty"`
 }
 
 // Decisions.

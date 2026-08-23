@@ -91,6 +91,16 @@ type Transition struct {
 	// its output was truncated, or it ran below the duration floor.
 	Servable bool `json:"servable"`
 
+	// ReadSet is what the action was observed to read, when a wrapper could
+	// report it. It is a real observation of a real action, so it rides the
+	// same leakage rule as everything else in this corpus.
+	//
+	// It is also the label a model would need in order to *predict* read sets
+	// for languages we cannot instrument. Such a prediction may only ever
+	// decide what to speculatively precompute, never what to serve: a wrong
+	// predicted scope is a wrong answer, a wrong precompute wastes a cycle.
+	ReadSet *ReadSet `json:"read_set,omitempty"`
+
 	// Provenance. Policy and Reason are what the classifier said; Key ties
 	// the row back to the cache entry it came from.
 	Policy string `json:"policy"`
@@ -169,6 +179,7 @@ func TransitionFrom(r *Record) (Transition, string, bool) {
 		TreeMutated: treeMoved,
 		EnvMutated:  envMoved,
 		Servable:    r.Servable,
+		ReadSet:     r.ReadSet,
 		Policy:      r.Policy,
 		Reason:      r.Reason,
 		Key:         r.Key,

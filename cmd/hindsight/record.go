@@ -39,7 +39,16 @@ func cmdRecord(args []string) error {
 	ws, wsErr := hp.NewWorkspace(cwd)
 
 	before := hp.State{Tree: *tree, EnvFP: *envfp}
+
+	// Arm the read-set wrapper for the duration of the command only.
+	//
+	// The disarm must happen before the after-state is measured. PYTHONPATH is
+	// in the environment allowlist, so leaving it set would move the
+	// fingerprint on every command, fail the purity gate every time, and stop
+	// the cache serving anything at all with no error reported anywhere.
+	disarm := hp.ArmReadSetIn(ws)
 	res := hp.Run(command, cwd, *timeout)
+	disarm()
 
 	// The purity gate. Recompute state after execution and refuse to mark the
 	// record servable if the command changed anything.
@@ -78,6 +87,12 @@ func cmdRecord(args []string) error {
 	}
 
 	if wsErr == nil {
+		// What the command was observed to read, if a wrapper could report it.
+		// Absent is the normal case and costs a tier-2 promotion, nothing else.
+		if rs, ok := hp.CaptureReadSet(ws.Root); ok {
+			rs.Policy = *policy
+			rec.ReadSet = rs
+		}
 		store, err := hp.OpenStore(hp.Home(ws.Root))
 		if err == nil {
 			// Blobs are content-addressed and written with an atomic rename,

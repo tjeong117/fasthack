@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -110,11 +111,11 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 	// to this command. This is where the value is: exact-tree matching
 	// collapses the moment agents start editing, and everything after that
 	// point is only recoverable by proving disjointness.
-	if rec, dec := s.tryScope(&req); rec != nil {
+	if rec, dec, tier := s.tryScope(&req); rec != nil {
 		resp := hitResp(rec, 0)
-		resp.Tier = 1
+		resp.Tier = tier
 		resp.ScopeReason = dec.Reason
-		s.emitScopedHit(&req, rec, dec)
+		s.emitScopedHit(&req, rec, dec, tier)
 		writeJSON(w, resp)
 		return
 	}
@@ -138,9 +139,9 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 // Bounded deliberately: each candidate costs a git diff-tree, and this sits on
 // the hook's critical path. Trying a handful of the most recent is worth it;
 // trying every historical tree is not.
-func (s *Server) tryScope(req *LookupReq) (*Record, ScopeDecision) {
+func (s *Server) tryScope(req *LookupReq) (*Record, ScopeDecision, int) {
 	if req.RepoRoot == "" || req.Tree == "" {
-		return nil, ScopeDecision{Reason: "no repo root supplied"}
+		return nil, ScopeDecision{Reason: "no repo root supplied"}, 0
 	}
 	cands := s.store.Candidates(req.CmdNorm, req.CwdRel, req.EnvFP)
 	const maxCandidates = 8
@@ -158,20 +159,30 @@ func (s *Server) tryScope(req *LookupReq) (*Record, ScopeDecision) {
 		// command issued from a subdirectory.
 		dec := ScopeMatchAt(req.RepoRoot, req.CwdRel, c.TreeBefore, req.Tree, req.Cmd)
 		if dec.Promoted {
-			return c, dec
+			return c, dec, 1
 		}
 		last = dec
+
+		// Tier 2. Tier 1 refuses anything that follows a dependency graph its
+		// arguments do not name, which is every command worth caching. If the
+		// recorded run reported what it actually read, the same disjointness
+		// argument can be made against a measurement instead of an inference.
+		if obs := ScopeMatchObserved(req.RepoRoot, c.TreeBefore, req.Tree, c.ReadSet); obs.Promoted {
+			return c, obs, 2
+		} else if c.ReadSet != nil {
+			last = obs
+		}
 	}
-	return nil, last
+	return nil, last, 0
 }
 
-func (s *Server) emitScopedHit(req *LookupReq, src *Record, dec ScopeDecision) {
+func (s *Server) emitScopedHit(req *LookupReq, src *Record, dec ScopeDecision, tier int) {
 	rec := &Record{
 		V: 1, TS: float64(time.Now().UnixMilli()) / 1000,
 		Agent: req.Agent, Cmd: req.Cmd, CmdNorm: req.CmdNorm, CwdRel: req.CwdRel,
 		TreeBefore: req.Tree, EnvFPBefore: req.EnvFP,
-		Key: req.Key, Policy: req.Policy, Decision: DecisionHit, Tier: 1,
-		Reason:      "tier-1: " + dec.Reason,
+		Key: req.Key, Policy: req.Policy, Decision: DecisionHit, Tier: tier,
+		Reason:      "tier-" + strconv.Itoa(tier) + ": " + dec.Reason,
 		DurationMS:  src.DurationMS,
 		ExitCode:    src.ExitCode,
 		StdoutBlob:  src.StdoutBlob,
