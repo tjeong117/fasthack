@@ -428,7 +428,7 @@ seed_hit() {
 # seed_fast runs a cheap command through the full record path until the
 # duration memo has enough samples to start skipping it.
 seed_fast() {
-	local repo="$1" cmd="$2" wrapped i
+	local repo="$1" cmd="$2" wrapped
 	for _ in 1 2 3; do
 		wrapped="$(rewrite_of "$repo" "$cmd")"
 		[ -n "$wrapped" ] || break
