@@ -34,6 +34,10 @@ KEEP=0
 # credibility check that never runs.
 VERIFY=1
 VERIFY_LIMIT=25
+# Fraction of served results re-executed in the background, in the state they
+# were recorded in. This has to happen during the run: afterwards every agent
+# has edited its worktree and no recorded state still exists to check against.
+VERIFY_RATE=1.0
 HINDSIGHT="${HINDSIGHT_BIN:-hindsight}"
 DRY_RUN=0
 AGENT_TIMEOUT=900
@@ -183,7 +187,8 @@ while [ $# -gt 0 ]; do
 	--timeout=*) AGENT_TIMEOUT="${1#*=}"; shift ;;
 	--timeout) need "$1" $#; AGENT_TIMEOUT="$2"; shift 2 ;;
 	--keep) KEEP=1; shift ;;
-	--no-verify) VERIFY=0; shift ;;
+	--no-verify) VERIFY=0; VERIFY_RATE=0; shift ;;
+	--verify-rate) VERIFY_RATE="$2"; shift 2 ;;
 	--verify-limit) VERIFY_LIMIT="$2"; shift 2 ;;
 	--dry-run) DRY_RUN=1; shift ;;
 	-h | --help) usage; exit 0 ;;
@@ -470,6 +475,7 @@ run_one() {
 		export HP_AGENT="$id"
 		export HP_ENABLE=1
 		export HP_SERVE="$HP_SERVE_VAL"
+		export HP_VERIFY_RATE="$VERIFY_RATE"
 		export HP_DAEMON="$DAEMON"
 		if [ -n "$HP_HOME_OPT" ]; then export HP_HOME="$HP_HOME_OPT"; fi
 		launch_agent "$PROMPT_TEXT"
@@ -613,7 +619,19 @@ LOG_PATH="$(resolve_log || true)"
 if [ "$MODE" = "cached" ] && [ "$VERIFY" = 1 ] && [ ${#WORKTREES[@]} -gt 0 ]; then
 	{
 		printf '\n  shadow verification\n'
-		verify_wt="${WORKTREES[0]}"
+		# Verify in a pristine worktree at the starting revision, not in an
+		# agent's. By now every agent has edited its own tree, so almost every
+		# recorded state has moved and would simply be skipped — which reports
+		# a near-empty verification and proves nothing. The states worth
+		# checking are the ones all the agents shared before they diverged,
+		# and this is where those still exist.
+		verify_wt="$OUT/verify"
+		if git -C "$REPO_TOP" worktree add --detach "$verify_wt" "$REF" >/dev/null 2>&1; then
+			WORKTREES[${#WORKTREES[@]}]="$verify_wt"
+		else
+			verify_wt="${WORKTREES[0]}"
+			printf '  (could not create a pristine worktree; verifying in %s)\n' "$verify_wt"
+		fi
 		if [ -d "$verify_wt" ]; then
 			(
 				cd "$verify_wt" || exit 1

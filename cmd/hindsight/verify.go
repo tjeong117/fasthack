@@ -30,6 +30,7 @@ func cmdVerify(args []string) error {
 	limit := fs.Int("limit", 20, "maximum records to check")
 	timeout := fs.Duration("timeout", 10*time.Minute, "per-command timeout")
 	quiet := fs.Bool("quiet", false, "only print the summary")
+	only := fs.String("key", "", "verify exactly one key, then exit")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -64,6 +65,9 @@ func cmdVerify(args []string) error {
 	for _, rec := range records {
 		if checked >= *limit {
 			break
+		}
+		if *only != "" && rec.Key != *only {
+			continue
 		}
 		if rec.TreeBefore != current.Tree || rec.EnvFPBefore != current.EnvFP {
 			skipped++

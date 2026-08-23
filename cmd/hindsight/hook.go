@@ -4,8 +4,12 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/tjeong117/fasthack/internal/hp"
 )
@@ -15,6 +19,36 @@ import (
 // the served command.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// spawnBackgroundVerify re-executes a served result, in the background, in the
+// state it was recorded in, and reports whether it matched.
+//
+// HP_VERIFY_RATE is the sampled fraction, 0 to 1. It defaults to 0 because
+// verifying every hit costs exactly the execution the hit avoided; a small
+// sample buys the credibility at a proportional price.
+func spawnBackgroundVerify(key, cwd string) {
+	rate, err := strconv.ParseFloat(os.Getenv("HP_VERIFY_RATE"), 64)
+	if err != nil || rate <= 0 {
+		return
+	}
+	if rate < 1 && rand.Float64() >= rate {
+		return
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(self, "verify", "--key", key, "--limit", "1", "--quiet")
+	cmd.Dir = cwd
+	cmd.Stdout, cmd.Stderr = nil, nil
+	// New session so it outlives this hook process without holding the agent's
+	// terminal, and so a slow re-execution never delays the served result.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	go func() { _ = cmd.Wait() }()
 }
 
 // cmdHook is the PreToolUse entry point.
@@ -116,6 +150,15 @@ func cmdHook(args []string) error {
 		if resp.Tier == 1 {
 			note += " [tier-1: " + resp.ScopeReason + "]"
 		}
+		// Shadow verification has to happen now or not at all. A served result
+		// can only be checked against a real re-execution in the state it was
+		// recorded in, and the agent is about to leave that state. Running it
+		// after the fan-out is why an earlier run served 29 results and
+		// verified none of them.
+		//
+		// It is sampled, because re-executing everything spends exactly the
+		// time the cache saved. Off by default; HP_VERIFY_RATE turns it on.
+		spawnBackgroundVerify(key, in.Cwd)
 		return hp.Rewrite(os.Stdout, harness, served, note)
 	}
 
