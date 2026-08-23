@@ -443,10 +443,15 @@ func BenchmarkTreeHashCold(b *testing.B) {
 // a 50k-file monorepo would be as cheap as a small one between edits.
 //
 // Unlike every other benchmark here the fixture is rebuilt rather than reused,
-// because this one dirties what it measures. Each iteration leaves one loose
-// object per changed file behind, and a fixture carrying half a million of
-// them measured four times slower than a fresh one — an artefact of how often
-// the suite had been run, not of anything the hook does.
+// because this one dirties what it measures: each iteration leaves one loose
+// object per changed file behind, so a reused fixture carries the debris of
+// every previous run.
+//
+// That turned out not to matter — five runs against freshly built fixtures
+// agreed with a run against a fixture carrying half a million leftover objects
+// to within 5% — but the rebuild stays, because a number that depends on how
+// many times the suite has been run is not reproducible even when it happens
+// to be stable.
 func BenchmarkTreeHashDirty(b *testing.B) {
 	if testing.Short() {
 		b.Skip("large fixture skipped under -short")

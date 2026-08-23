@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/tjeong117/fasthack/internal/hp"
@@ -12,6 +13,7 @@ import (
 func cmdKey(args []string) error {
 	fs := flag.NewFlagSet("key", flag.ContinueOnError)
 	command := fs.String("cmd", "", "command to key (optional)")
+	explain := fs.Bool("explain", false, "print the canonical pre-image the key hashes")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -49,6 +51,15 @@ func cmdKey(args []string) error {
 		fmt.Printf("cmd-norm    %s\n", norm)
 		fmt.Printf("policy      %s (%s)\n", policy, reason)
 		fmt.Printf("key         %s\n", hp.Key(state, ws.CwdRel(dir), norm))
+		if *explain {
+			// The pre-image, so two agents that failed to share a key can diff
+			// this and see which component actually differs.
+			fmt.Printf("\npre-image (this is what the key hashes)\n")
+			for _, line := range strings.Split(strings.TrimRight(hp.KeyText(state, ws.CwdRel(dir), norm), "\n"), "\n") {
+				fmt.Printf("  %s\n", line)
+			}
+			fmt.Printf("\ndiff this against another agent's output to find why a key did not match\n")
+		}
 	}
 	return nil
 }

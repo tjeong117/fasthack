@@ -41,8 +41,16 @@ import (
 // a new conftest.py in a parent directory, a new module that shadows an
 // installed one -- the recorded set is silent about it by construction and
 // disjointness is a lie. This is the known failure of observed-dependency
-// caching and it is why Bazel makes you declare instead. It is handled here by
-// refusing on additions rather than by pretending it does not exist.
+// caching and it is why Bazel makes you declare instead.
+//
+// It is handled by enumerating how a file gets read *without* being imported,
+// not by refusing on additions wholesale. The three examples above are all
+// discovered by scanning a directory or by resolving a name against a search
+// path, and firstUnsafeAddition refuses on exactly those. An addition nothing
+// discovers is unreachable, because promotion already requires that no file in
+// the read set changed: the import graph is the one we measured, and a graph
+// that did not change cannot reach a file that did not exist when we measured
+// it.
 //
 // The second gap is the capture method itself. sys.modules reports imports,
 // not file reads, so a test that opens a fixture with open() has a dependency
@@ -152,18 +160,17 @@ func (rs *ReadSet) Observes(p string) bool {
 }
 
 // Dirs are the directories the set read from, deduplicated and sorted.
-//
-// Containment against these is recursive, and the repo root counts: a read set
-// containing a root-level module makes every added file in the tree suspect.
-// That is coarse, and it is the correct direction -- an addition is the one
-// change an observed set is structurally blind to.
 func (rs *ReadSet) Dirs() []string {
 	if rs == nil {
 		return nil
 	}
+	return readSetDirsOf(rs.Paths)
+}
+
+func readSetDirsOf(paths []string) []string {
 	seen := map[string]bool{}
-	out := make([]string, 0, len(rs.Paths))
-	for _, p := range rs.Paths {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
 		d := path.Dir(p)
 		if !seen[d] {
 			seen[d] = true
@@ -172,6 +179,67 @@ func (rs *ReadSet) Dirs() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// testDirs are the directories the run collected a test file from, judged by
+// the project's own discovery patterns.
+//
+// These are the directories where a new file can change the run without
+// anything importing it, because pytest walks them rather than following a
+// reference into them, and it walks them recursively. They are also where
+// fixture data lives, which is the one place a test that globs a directory at
+// runtime is likely to be pointed at.
+func (rs *ReadSet) testDirs() []string {
+	if rs == nil {
+		return nil
+	}
+	var tests []string
+	for _, p := range rs.Paths {
+		if _, ok := rs.matchedTestGlob(path.Base(p)); ok {
+			tests = append(tests, p)
+		}
+	}
+	return readSetDirsOf(tests)
+}
+
+// matchedTestGlob reports which of the project's discovery patterns collects a
+// file with this base name, if any.
+func (rs *ReadSet) matchedTestGlob(base string) (string, bool) {
+	for _, g := range rs.discoveryGlobs() {
+		if ok, err := path.Match(g, base); err == nil && ok {
+			return g, true
+		}
+	}
+	return "", false
+}
+
+// importRoots are the directories this run is known to resolve *top-level*
+// module names out of, and they are the reason additions cannot be waved
+// through wholesale.
+//
+// A new module dropped into one of these shadows an installed distribution or
+// a stdlib module of the same name: `import json` resolved to the stdlib when
+// we observed the run, and resolves to the new file afterwards. Nothing in the
+// read set changed, nothing new was imported by name, and the answer is still
+// different. Deeper in the tree the risk goes away, because a file added to a
+// package directory only creates the new dotted name pkg.thing, which no
+// unchanged import statement mentions.
+//
+// The repo root is always one: pytest puts the rootdir on sys.path under the
+// default prepend import mode, and `python -m pytest` puts the invocation
+// directory there regardless. A directory holding a conftest.py the run
+// imported is the other, for the same prepend rule.
+func (rs *ReadSet) importRoots() map[string]bool {
+	roots := map[string]bool{".": true}
+	if rs == nil {
+		return roots
+	}
+	for _, p := range rs.Paths {
+		if path.Base(p) == "conftest.py" {
+			roots[path.Dir(p)] = true
+		}
+	}
+	return roots
 }
 
 // defaultTestGlobs are pytest's own defaults, used only when the wrapper could
@@ -247,6 +315,10 @@ func ScopeMatchObserved(repoRoot, recordedTree, currentTree string, rs *ReadSet)
 			ScopePaths:   rs.Paths,
 		}
 	}
+	isAdded := make(map[string]bool, len(added))
+	for _, a := range added {
+		isAdded[a] = true
+	}
 
 	// A toolchain file reconfigures the run regardless of what it imported.
 	// A changed pyproject.toml re-points testpaths and addopts; a changed
@@ -276,7 +348,17 @@ func ScopeMatchObserved(repoRoot, recordedTree, currentTree string, rs *ReadSet)
 	// sys.modules set was provably not imported. A changed .json missing from
 	// the same set was possibly read with open() and never reported, so it
 	// refuses even though the disjointness check above was satisfied.
+	//
+	// Additions are exempt, and only additions. The gate asks whether the
+	// recorded run could have read this file's *previous* contents without the
+	// method noticing; a file that did not exist has no previous contents and
+	// the question is empty. What its existence does to the *next* run is a
+	// different question, and firstUnsafeAddition above is the whole of our
+	// answer to it.
 	for _, c := range changed {
+		if isAdded[c] {
+			continue
+		}
 		if !info.observes[strings.ToLower(path.Ext(c))] {
 			return ScopeDecision{
 				Reason: "changed path " + c + " is not a kind of file this capture method reports (" +
@@ -314,34 +396,57 @@ var readSetAutoDiscovered = map[string]bool{
 
 // firstUnsafeAddition returns the first added path that could change what the
 // command reads, together with the argument for why it could.
+//
+// The narrowness here is load-bearing, and it rests on a precondition this
+// function does not check: ScopeMatchObserved refuses whenever any file *in*
+// the read set changed, and it does so for every diff that reaches this point.
+// So the import graph rooted at the command's entry points is byte-identical
+// to the one we measured, and an import graph that did not change cannot
+// suddenly reach a file that did not exist when we measured it. Every rule
+// below is therefore about the ways a file gets picked up *without* being
+// imported by something -- by a directory being scanned, or by a name being
+// resolved against a search path.
+//
+// Everything else -- a new README, a new module in a package nothing imports,
+// a new fixture in a directory no test was collected from -- is unreachable
+// from an unchanged import graph, and refusing it only costs hits. The earlier
+// rule refused on any added .py and on anything sharing a directory with
+// anything the run read, which in a repo with a root-level conftest.py meant
+// every addition anywhere refused, which in a fan-out where agents add files
+// constantly meant almost nothing promoted.
+//
+// The residual risk is code in the read set that globs a directory at runtime
+// and opens what it finds. sys.modules cannot see that, and neither can we.
+// Rule 3 covers where it actually happens -- fixtures under a test directory.
 func firstUnsafeAddition(added []string, rs *ReadSet) (string, string) {
-	dirs := rs.Dirs()
+	testDirs := rs.testDirs()
+	roots := rs.importRoots()
 	for _, a := range added {
 		base := path.Base(a)
 		if readSetAutoDiscovered[base] || strings.HasSuffix(base, ".pth") {
 			return a, "which python finds by name rather than by reference: the recorded run could not " +
 				"have read a file that did not exist, and the next run will read it without anything importing it"
 		}
-		for _, g := range rs.discoveryGlobs() {
-			if ok, err := path.Match(g, base); err == nil && ok {
-				return a, "which matches this project's own test discovery pattern " + strconv.Quote(g) +
-					", so the recorded run collected a strictly smaller set of tests than the next one will"
-			}
+		if g, ok := rs.matchedTestGlob(base); ok {
+			return a, "which matches this project's own test discovery pattern " + strconv.Quote(g) +
+				", so the recorded run collected a strictly smaller set of tests than the next one will"
 		}
-		if rs.Observes(a) {
-			return a, "which is a file this capture method would have reported had it existed, so the " +
-				"recorded set is silent about it by construction rather than by proof"
+		if d := firstContainingDir(testDirs, a); d != "" {
+			return a, "under " + readSetDirName(d) + ", which the recorded run collected tests from; " +
+				"collection walks that directory rather than importing into it, and the method cannot " +
+				"see a directory being walked"
 		}
-		if d := firstContainingDir(dirs, a); d != "" {
-			return a, "inside " + readSetDirName(d) + ", which the recorded run read from; the method " +
-				"cannot see a directory being walked, so a new file there may be picked up unobserved"
+		if rs.Observes(a) && roots[path.Dir(a)] {
+			return a, "a new top-level module in " + readSetDirName(path.Dir(a)) + ", which is on this " +
+				"run's import search path: an unchanged `import " + strings.TrimSuffix(base, path.Ext(base)) +
+				"` that resolved to an installed package would resolve to this file instead"
 		}
 	}
 	return "", ""
 }
 
-// firstContainingDir reports the first read-set directory that contains p,
-// recursively. The repo root contains everything, which is deliberate.
+// firstContainingDir reports the first of dirs that contains p, recursively.
+// The repo root contains everything, which is deliberate.
 func firstContainingDir(dirs []string, p string) string {
 	for _, d := range dirs {
 		if d == "." || strings.HasPrefix(p, d+"/") {

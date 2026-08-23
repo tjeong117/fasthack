@@ -176,12 +176,12 @@ func TestReadSetRefusesAnAddedTestFile(t *testing.T) {
 }
 
 // TestReadSetRefusesAnAddedFileInADirectoryTheRunRead covers the addition that
-// no name rule catches: a new fixture in a directory the run was reading from.
-// sys.modules cannot see a directory being walked, so the only safe answer is
-// to refuse.
+// no name rule catches: a new fixture under a directory the run collected
+// tests from. Collection walks that subtree, and a test that globs its own
+// data directory reads what the walk turns up; sys.modules sees neither.
 func TestReadSetRefusesAnAddedFileInADirectoryTheRunRead(t *testing.T) {
-	// A read set with no root-level file, so the repo root is not a touched
-	// directory and the directory rule has to fire on tests/ specifically.
+	// A read set with no root-level file, so the repo root is not implicated
+	// and the directory rule has to fire on tests/ specifically.
 	rs := readSetOf("src/billing.py", "tests/test_billing.py")
 	root, recorded, current := scopeRepo(t, pyRepoSeed(), func(root string) {
 		scopeWrite(t, root, "tests/data/refunds.json", "{\"rate\": 1}\n")
@@ -193,19 +193,141 @@ func TestReadSetRefusesAnAddedFileInADirectoryTheRunRead(t *testing.T) {
 	}
 }
 
-// TestReadSetRefusesAnAddedSourceFile: any added file the method would have
-// reported had it existed. A new module can shadow an installed one or be
-// picked up by a dynamic import, and the recorded set is silent about it by
-// construction.
-func TestReadSetRefusesAnAddedSourceFile(t *testing.T) {
-	root, recorded, current := scopeRepo(t, pyRepoSeed(), func(root string) {
-		scopeWrite(t, root, "vendor/json.py", "VALUE = 1\n")
-	})
-	d := ScopeMatchObserved(root, recorded, current, readSetOf("src/billing.py", "tests/test_billing.py"))
-	scopeCheck(t, d, false)
-	if !strings.Contains(d.Reason, "vendor/json.py") {
-		t.Fatalf("the refusal must name the added module: %q", d.Reason)
+// TestReadSetAdditions is the boundary between an addition the recorded run
+// can be shown not to reach and one it cannot.
+//
+// The argument for every promotion below is the same, and it is the one this
+// file's addition rule now rests on: getting here at all requires that no file
+// in the read set changed, so the import graph is byte-identical to the one
+// sys.modules reported, and an unchanged graph cannot reach a file that did
+// not exist when it was measured. The refusals are the ways a file is read
+// without being imported -- scanned out of a directory, or resolved by name
+// against the import search path.
+//
+// The rule this replaced refused on every added .py and on anything sharing a
+// directory with anything the run read. pyRepoSeed has a root-level
+// conftest.py, which made the repo root a read directory, which refused every
+// addition anywhere in the tree. Half the rows below are that bug.
+func TestReadSetAdditions(t *testing.T) {
+	// A read set with no root-level entry, for the rows that need the repo
+	// root not to be implicated by conftest.py.
+	nested := readSetOf("src/billing.py", "tests/test_billing.py")
+
+	cases := []struct {
+		name    string
+		added   map[string]string
+		rs      *ReadSet
+		promote bool
+		want    string
+	}{{
+		name:    "a document nothing could import",
+		added:   map[string]string{"README.md": "# notes\n"},
+		rs:      pyObservedSet(),
+		promote: true,
+	}, {
+		// The row the feature is worth having for. Agents add modules
+		// constantly, and src/ is a package: the addition creates the name
+		// src.newmodule, which no unchanged import statement mentions.
+		name:    "a new module in a package nothing imports",
+		added:   map[string]string{"src/newmodule.py": "def f():\n    return 1\n"},
+		rs:      pyObservedSet(),
+		promote: true,
+	}, {
+		name:    "a new fixture in a directory unrelated to the tests",
+		added:   map[string]string{"assets/logo.svg": "<svg/>\n"},
+		rs:      pyObservedSet(),
+		promote: true,
+	}, {
+		// Not promotable, and not because of the addition: a file inside the
+		// read set changed. This is the precondition the whole loosening
+		// argument depends on, so it gets a row of its own.
+		name: "an unreachable addition alongside an edit inside the read set",
+		added: map[string]string{
+			"src/newmodule.py": "def f():\n    return 1\n",
+			"src/billing.py":   "def total():\n    return 999\n",
+		},
+		rs:      pyObservedSet(),
+		promote: false,
+		want:    "src/billing.py",
+	}, {
+		name:    "a conftest in a directory the run never touched",
+		added:   map[string]string{"other/pkg/conftest.py": "import pytest\n"},
+		rs:      pyObservedSet(),
+		promote: false,
+		want:    "by name rather than by reference",
+	}, {
+		name:    "an __init__.py that changes package resolution",
+		added:   map[string]string{"other/__init__.py": ""},
+		rs:      pyObservedSet(),
+		promote: false,
+		want:    "by name rather than by reference",
+	}, {
+		name:    "a .pth file the interpreter executes at startup",
+		added:   map[string]string{"vendor/inject.pth": "import vendor\n"},
+		rs:      pyObservedSet(),
+		promote: false,
+		want:    "by name rather than by reference",
+	}, {
+		// The default globs would not collect this one. The project's own
+		// configuration does, and the plugin reports it, so we use it.
+		name:    "a file matching the project's own discovery pattern",
+		added:   map[string]string{"src/check_refunds.py": "def test_x():\n    assert True\n"},
+		rs:      withGlobs(pyObservedSet(), "check_*.py"),
+		promote: false,
+		want:    "discovery pattern",
+	}, {
+		name:    "a plain file under a directory the run collected tests from",
+		added:   map[string]string{"tests/data/refunds.json": "{}\n"},
+		rs:      nested,
+		promote: false,
+		want:    "collected tests from",
+	}, {
+		// The case the loosening argument does not cover. `import json`
+		// resolved to the stdlib when we watched the run; the repo root is on
+		// sys.path, so afterwards it resolves here.
+		name:    "a top-level module that can shadow an installed one",
+		added:   map[string]string{"json.py": "VALUE = 1\n"},
+		rs:      nested,
+		promote: false,
+		want:    "import search path",
+	}, {
+		// Same file name, one directory down, in a directory nothing in the
+		// read set was imported from. It is not on any search path we can see,
+		// so it shadows nothing and is unreachable from an unchanged graph.
+		name:    "the same name where it is not on a search path",
+		added:   map[string]string{"vendor/json.py": "VALUE = 1\n"},
+		rs:      nested,
+		promote: true,
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root, recorded, current := scopeRepo(t, pyRepoSeed(), func(root string) {
+				for rel, body := range tc.added {
+					scopeWrite(t, root, rel, body)
+				}
+			})
+			d := ScopeMatchObserved(root, recorded, current, tc.rs)
+			scopeCheck(t, d, tc.promote)
+			if tc.want != "" && !strings.Contains(d.Reason, tc.want) {
+				t.Fatalf("reason %q does not contain %q", d.Reason, tc.want)
+			}
+			if !tc.promote {
+				return
+			}
+			for rel := range tc.added {
+				if !strings.Contains(strings.Join(d.ChangedPaths, " "), rel) {
+					t.Fatalf("the promotion did not see %s in the diff: %v", rel, d.ChangedPaths)
+				}
+			}
+		})
 	}
+}
+
+func withGlobs(rs *ReadSet, globs ...string) *ReadSet {
+	out := *rs
+	out.TestGlobs = globs
+	return &out
 }
 
 // TestReadSetRefusesAChangedPathTheMethodCannotSee is the second half of part

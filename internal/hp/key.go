@@ -241,9 +241,37 @@ func NormalizeCommand(cmd string) string {
 // Key binds everything that can change what a command prints.
 func Key(st State, cwdRel, cmdNorm string) string {
 	h := sha256.New()
-	for _, part := range []string{KeyVersion, st.Tree, st.EnvFP, cwdRel, cmdNorm} {
-		h.Write([]byte(part))
-		h.Write([]byte{0})
-	}
+	h.Write([]byte(KeyText(st, cwdRel, cmdNorm)))
 	return KeyVersion + ":" + hex.EncodeToString(h.Sum(nil))
+}
+
+// KeyText is the canonical pre-image the key hashes.
+//
+// A hash tells you two keys differ; it cannot tell you why, and "why did this
+// miss?" is the question that actually comes up. Keeping the readable
+// pre-image alongside the digest makes a miss diffable between two agents.
+//
+// This is not hypothetical. The environment fingerprint was hashing each
+// worktree's own name out of pyvenv.cfg, which drove the hit rate on Python
+// fan-outs to zero, looked exactly like agents diverging, and took a
+// five-agent run on a real repository to find. Diffing two pre-images would
+// have shown it immediately.
+//
+// The idea is borrowed from Experiential Labs (Apache-2.0), whose
+// render_rag_key stores key_text beside key_sha256 for the same reason.
+func KeyText(st State, cwdRel, cmdNorm string) string {
+	var b strings.Builder
+	for _, kv := range [][2]string{
+		{"v", KeyVersion},
+		{"tree", st.Tree},
+		{"env_fp", st.EnvFP},
+		{"cwd", cwdRel},
+		{"cmd", cmdNorm},
+	} {
+		b.WriteString(kv[0])
+		b.WriteByte('=')
+		b.WriteString(kv[1])
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
