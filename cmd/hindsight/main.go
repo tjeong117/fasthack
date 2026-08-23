@@ -17,6 +17,7 @@ const usage = `hindsight - a build cache for coding agents
   hindsight stats                           print counters from the daemon
   hindsight init                            install hook config into this repo
   hindsight doctor                          check this workspace is cacheable
+  hindsight classify [--reason]             classify commands from stdin, one per line
   hindsight cache export|import             move a warm cache between machines
   hindsight transitions [--stats]           emit the observed transition corpus
   hindsight replay <corpus>                 what a recorded trace would have saved
@@ -51,6 +52,8 @@ func main() {
 		err = cmdStats(os.Args[2:])
 	case "init":
 		err = cmdInit(os.Args[2:])
+	case "classify":
+		err = cmdClassify(os.Args[2:])
 	case "doctor":
 		err = cmdDoctor(os.Args[2:])
 	case "cache":
