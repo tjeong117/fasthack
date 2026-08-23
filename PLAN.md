@@ -4,7 +4,7 @@ The frozen contract and file ownership live in [AGENTS.md](AGENTS.md). The curre
 
 ## Current HEAD — August 23, 2026
 
-Local `main`, `origin/main`, and remote `main` are synchronized at `c7e0843` (`Record the real five-agent fan-out`).
+This finish plan was rebased onto remote `main` at `9e1fdb9` (`add build cache and doctor support`).
 
 The core implementation is built. Tom has already landed:
 
@@ -13,7 +13,9 @@ The core implementation is built. Tom has already landed:
 - baseline/cached fleet orchestration;
 - fixture and live-event viewer behavior;
 - a synthetic controlled run;
-- a real five-agent Claude Code run.
+- a real five-agent Claude Code run;
+- cheap-command gating, Tier-1 scoping, multi-language fingerprints, replay,
+  build-cache adapters, and doctor diagnostics.
 
 Measured real-fleet result at this commit:
 
@@ -86,7 +88,7 @@ If the available corpus cannot regenerate a number, remove or qualify the claim 
 
 ## Completion gates
 
-- [x] Remote `main` pulled and synchronized at `c7e0843`.
+- [x] Work rebased onto remote `main` at `9e1fdb9`.
 - [x] Go build passes.
 - [x] Go tests pass with loopback binding available.
 - [x] Policy and normalization tests exist.

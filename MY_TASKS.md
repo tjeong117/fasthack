@@ -5,8 +5,8 @@ This file delegates only the work Tom assigns to the **Teammate** in the latest 
 ## Git state
 
 - Branch: `main`
-- Local HEAD: `c7e0843`
-- Remote HEAD: `c7e0843`
+- PR base: remote `main` at `9e1fdb9`
+- Work branch: `codex/viewer-evidence-docs`
 - `git pull --rebase --autostash origin main`: already up to date
 
 Do not create or checkout another branch. The project contract says both teammates work directly on `main` with disjoint file ownership.
