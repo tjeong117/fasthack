@@ -690,6 +690,19 @@ served_ms = executed_ms = wait_ms = 0
 verified_true = verified_false = 0
 per_agent = {}
 
+
+def count_verdict(r):
+    """Tally one shadow-verification verdict. Returns True if it was one."""
+    global verified_true, verified_false
+    if r.get("verified") is True:
+        verified_true += 1
+        return True
+    if r.get("verified") is False:
+        verified_false += 1
+        return True
+    return False
+
+
 for r in windowed:
     dec = str(r.get("decision") or "")
     agent = str(r.get("agent") or "?")
@@ -697,16 +710,26 @@ for r in windowed:
         dur = int(r.get("duration_ms") or 0)
     except (TypeError, ValueError):
         dur = 0
+
+    # Shadow verification emits its own terminal records under a synthetic
+    # agent, rather than annotating the HIT it re-executed. Reading `verified`
+    # off HIT records alone reported verified_true=0/verified_false=0 for runs
+    # whose log held nine divergences -- a machine-readable clean bill of
+    # health that the log contradicted. Count the VERIFY records, and keep the
+    # verifier out of per_agent: it is an auditor, not a fleet member, and a
+    # sixth all-zero lane in a five-agent run reads as a bug.
+    if dec == "VERIFY":
+        count_verdict(r)
+        continue
+
     slot = per_agent.setdefault(agent, {"hit": 0, "exec": 0, "wait": 0, "deleted_ms": 0, "exec_ms": 0})
     if dec == "HIT":
         served += 1
         served_ms += dur
         slot["hit"] += 1
         slot["deleted_ms"] += dur
-        if r.get("verified") is True:
-            verified_true += 1
-        elif r.get("verified") is False:
-            verified_false += 1
+        # Still honoured for the inline form, where a verdict rides the HIT.
+        count_verdict(r)
     elif dec in EXECUTED:
         executed += 1
         executed_ms += dur
@@ -751,11 +774,13 @@ if waits:
     w("  %-38s %10.1fs" % ("  of which won by in-flight leases", wait_ms / 1000.0))
 w("  %-38s %10.1fs" % ("if every agent executed everything", counterfactual_ms / 1000.0))
 w("  %-38s %10.1f%%" % ("hit rate", hit_rate))
+verified_checked = verified_true + verified_false
+if verified_checked:
+    w("  %-38s %11d" % ("shadow-verified served results", verified_true))
+    w("  %-38s %11d" % ("  re-executed and checked", verified_checked))
 if verified_false:
     w("")
     w("  *** %d DIVERGENT served result(s) — investigate before quoting ***" % verified_false)
-elif verified_true:
-    w("  %-38s %11d" % ("shadow-verified served results", verified_true))
 if served == 0 and mode == "cached":
     w("")
     w("  note: zero hits. Check that the daemon is up and that HP_SERVE=1")
@@ -788,6 +813,7 @@ with open(json_out, "w") as fh:
             "hit_rate_pct": round(hit_rate, 2),
             "verified_true": verified_true,
             "verified_false": verified_false,
+            "verified_checked": verified_checked,
             "per_agent": per_agent,
         },
         fh,

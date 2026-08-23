@@ -176,6 +176,85 @@ func TestNormalizeLeavesInputAlone(t *testing.T) {
 	}
 }
 
+// pytestWarningTail is the shape of output that breaks cross-worktree
+// verification: pytest prints the warning's source location as an absolute
+// path, so two correct runs of the same command in two worktrees produce
+// byte-different output that differs only in the worktree prefix.
+//
+// Taken verbatim from demo-runs/20260823-154831, where nine of twelve
+// shadow-verifications reported a divergence that was not one.
+func pytestWarningTail(root string) []byte {
+	return []byte("=============================== warnings summary ===============================\n" +
+		"sympy/core/tests/test_arit.py:1699\n" +
+		"  " + root + "/sympy/core/tests/test_arit.py:1699: PytestUnknownMarkWarning: " +
+		"Unknown pytest.mark.thread_unsafe - is this a typo?\n" +
+		"    @pytest.mark.thread_unsafe(\n\n" +
+		"101 passed, 2 xfailed, 1 warning in 2.79s\n")
+}
+
+// A record produced in one worktree, verified in another.
+//
+// cmd/hindsight/verify.go normalizes both the freshly re-executed output and
+// the recorded output with the VERIFIER's root. That is correct for the fresh
+// output and wrong for the recorded output, which carries the producing
+// agent's root and therefore never matches the string being substituted.
+//
+// This test pins that the defect is in the caller, not here: given the root
+// the output was actually produced under, Normalize already agrees. There is
+// no repair available inside Normalize, because its frozen signature accepts
+// exactly one root and the recorded root is not recoverable from the bytes.
+// The proposed one-line caller fix is written up in NORM_CROSS_WORKTREE.md.
+func TestNormalizeCrossWorktreeRoots(t *testing.T) {
+	const (
+		producer = "/private/tmp/fleet-cached-20260823-154831/a3"
+		verifier = "/private/tmp/fleet-cached-20260823-154831/verify"
+		home     = "/Users/a"
+	)
+	recorded := pytestWarningTail(producer)
+	fresh := pytestWarningTail(verifier)
+
+	// What verify.go does today.
+	wantN := Normalize(recorded, verifier, home)
+	gotN := Normalize(fresh, verifier, home)
+	if bytes.Equal(gotN, wantN) {
+		t.Fatal("expected the verifier's root to mis-normalize the recorded output; " +
+			"if this now passes, the caller was fixed and this test should assert equality")
+	}
+
+	// And why. The fresh output loses its prefix to {{ROOT}}; the recorded
+	// output falls through to the temp-dir pattern, which swallows the whole
+	// path tail and leaves the /private that the pattern is not anchored to.
+	if !bytes.Contains(gotN, []byte("{{ROOT}}/sympy/core/tests/test_arit.py")) {
+		t.Errorf("fresh output should carry {{ROOT}}, got:\n%s", gotN)
+	}
+	if !bytes.Contains(wantN, []byte("/private{{TMP}}")) {
+		t.Errorf("recorded output should fall through to {{TMP}}, got:\n%s", wantN)
+	}
+
+	// Handed the root each blob was actually produced under, the same two
+	// runs agree. This is the whole fix.
+	if fixed, want := Normalize(fresh, verifier, home), Normalize(recorded, producer, home); !bytes.Equal(fixed, want) {
+		t.Errorf("normalizing each blob against its own root should agree\n got %q\nwant %q", fixed, want)
+	}
+}
+
+// The three commands in the demo split 1 clean / 2 divergent for a reason:
+// output with no absolute path in it has nothing for the root substitution to
+// get wrong, so it verifies cleanly even with the roots mismatched. Anything
+// that prints a path does not. This is the control for the test above.
+func TestNormalizeCrossWorktreeRelativeOutputIsUnaffected(t *testing.T) {
+	const (
+		producer = "/private/tmp/fleet-cached-20260823-154831/a3"
+		verifier = "/private/tmp/fleet-cached-20260823-154831/verify"
+	)
+	out := []byte("................................x....................................... [ 64%]\n" +
+		"..................x....................                                  [100%]\n\n" +
+		"109 passed, 1 deselected, 2 xfailed in 1.81s\n")
+	if !bytes.Equal(Normalize(out, verifier, ""), Normalize(out, producer, "")) {
+		t.Error("output with no absolute paths must normalize identically under any root")
+	}
+}
+
 // Output is bytes, not text. Invalid UTF-8 must survive the round trip.
 func TestNormalizeBinarySafe(t *testing.T) {
 	in := []byte{0x00, 0xff, 0xfe, '/', 'w', '/', 'a', 0x80}
