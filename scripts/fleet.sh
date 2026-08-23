@@ -115,6 +115,16 @@ rule() {
 launch_agent() {
 	local prompt="$1"
 
+	# FLEET_AGENT_CMD overrides the driver. It receives the prompt as $1 and
+	# runs in the agent's worktree with HP_* already exported. This exists so
+	# the baseline/cached comparison can be driven by a deterministic command
+	# sequence: a real model rerun introduces enough variance between the two
+	# arms to swamp the effect being measured, which makes it a poor control.
+	if [ -n "${FLEET_AGENT_CMD:-}" ]; then
+		sh -c "$FLEET_AGENT_CMD" _ "$prompt"
+		return
+	fi
+
 	codex exec --dangerously-bypass-hook-trust "$prompt"
 
 	# Claude Code equivalent:
@@ -123,9 +133,15 @@ launch_agent() {
 
 # Human-readable form of the above, printed by --dry-run. Keep in sync.
 LAUNCH_DESC='codex exec --dangerously-bypass-hook-trust "<prompt>"'
+if [ -n "${FLEET_AGENT_CMD:-}" ]; then
+	LAUNCH_DESC="sh -c '$FLEET_AGENT_CMD' _ \"<prompt>\""
+fi
 
 # The binary that launch_agent needs on PATH, for the preflight check.
 LAUNCH_BIN='codex'
+if [ -n "${FLEET_AGENT_CMD:-}" ]; then
+	LAUNCH_BIN='sh'
+fi
 
 # ---------------------------------------------------------------------------
 # Argument parsing
