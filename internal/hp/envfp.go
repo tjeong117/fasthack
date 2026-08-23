@@ -160,7 +160,7 @@ func (pythonEcosystem) Fingerprint(root string, h hash.Hash) error {
 	if !exists(venv) {
 		return ErrNotInstalled
 	}
-	hashFiles(venv, h, "pyvenv.cfg")
+	hashPyvenvCfg(venv, h)
 
 	libRoot := filepath.Join(venv, "lib")
 	pythons, err := os.ReadDir(libRoot)
@@ -184,6 +184,50 @@ func (pythonEcosystem) Fingerprint(root string, h hash.Hash) error {
 		return ErrNotInstalled
 	}
 	return nil
+}
+
+// pyvenvVolatileKeys name their own worktree and nothing about what is
+// installed in it.
+//
+// This is the difference between the cache working and not working on Python.
+// `python -m venv` records `command = ... -m venv /abs/path/a1/.venv` and
+// `uv venv` records `prompt = a1`, so five worktrees of one project produce
+// five fingerprints for byte-identical environments and the hit rate is
+// structurally zero. It looks exactly like agents diverging, which is why it
+// went unnoticed until a real fan-out on a real repository.
+//
+// Everything else in the file is kept, because `home`, `version`, `executable`
+// and `include-system-site-packages` all genuinely change what a command does.
+var pyvenvVolatileKeys = map[string]bool{
+	"command": true,
+	"prompt":  true,
+}
+
+// hashPyvenvCfg folds a virtualenv's configuration into h, minus the parts
+// that describe where the worktree happens to live.
+func hashPyvenvCfg(venv string, h hash.Hash) {
+	b, err := os.ReadFile(filepath.Join(venv, "pyvenv.cfg"))
+	if err != nil {
+		return
+	}
+	h.Write([]byte("pyvenv.cfg\x00"))
+	lines := strings.Split(string(b), "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		key, _, ok := strings.Cut(line, "=")
+		if ok && pyvenvVolatileKeys[strings.ToLower(strings.TrimSpace(key))] {
+			continue
+		}
+		if s := strings.TrimSpace(line); s != "" {
+			kept = append(kept, s)
+		}
+	}
+	// Sorted, because the writer's field order is not part of the environment.
+	sort.Strings(kept)
+	for _, line := range kept {
+		h.Write([]byte(line))
+		h.Write([]byte{0})
+	}
 }
 
 // venvPath resolves the active virtualenv for a workspace.
