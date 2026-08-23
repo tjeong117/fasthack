@@ -13,6 +13,8 @@
 #   disabled     HP_ENABLE unset. Binary spawn and nothing else, which is the
 #                floor nobody can get under.
 #   passthrough  The classifier rejects the command before any git work.
+#   known-fast   The duration memo has seen this command run under the floor
+#                three times and bails before hashing anything.
 #   miss         The full key path plus a daemon round trip, ending in a
 #                rewrite to `hindsight record`. A unique command each
 #                iteration, so no two share a key.
@@ -20,6 +22,11 @@
 #   daemon-down  The full key path, then a refused connection and a
 #                passthrough. This is what every user pays who has not started
 #                the daemon, in exchange for nothing.
+#
+# The commands used for the hit and record paths have to clear the minimum
+# duration floor, or nothing they produce is servable and there is no hit path
+# to measure. `grep -c` over a generated data file takes about 90 ms and prints
+# one line, which clears the floor without risking output truncation.
 #
 # Usage: bash scripts/bench.sh [--iterations N] [--large N] [--with-go]
 #
@@ -91,6 +98,11 @@ perl -MTime::HiRes -MJSON::PP -e1 2>/dev/null || {
 	echo "bench.sh: perl needs the core modules Time::HiRes and JSON::PP" >&2
 	exit 1
 }
+
+# An inherited GIT_DIR, GIT_INDEX_FILE or GIT_WORK_TREE points every git call
+# in here at somebody else's repository, which fails confusingly a hundred
+# lines later. They are never wanted in a benchmark.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_OBJECT_DIRECTORY
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/hindsight-bench-XXXXXX")"
 BIN="$WORK/hindsight"
@@ -295,6 +307,15 @@ make_repo() {
 			}
 		}'
 
+		# Something for a genuinely slow read to chew on. Committed rather than
+		# gitignored, so the hit path being measured does not quietly depend on
+		# reading a file the key cannot see.
+		awk 'BEGIN {
+			srand(7)
+			for (i = 0; i < 400000; i++)
+				printf("line %08d payloadpayloadpayload\n", int(rand() * 99999999))
+		}' >bench-data.txt
+
 		git add -A
 		git commit -q -m fixture
 	)
@@ -404,9 +425,25 @@ seed_hit() {
 	esac
 }
 
-HIT_CMD="echo hindsight-bench-hit"
+# seed_fast runs a cheap command through the full record path until the
+# duration memo has enough samples to start skipping it.
+seed_fast() {
+	local repo="$1" cmd="$2" wrapped i
+	for i in 1 2 3; do
+		wrapped="$(rewrite_of "$repo" "$cmd")"
+		[ -n "$wrapped" ] || break
+		(cd "$repo" && sh -c "$wrapped") >/dev/null 2>&1 || true
+	done
+	if [ -n "$(rewrite_of "$repo" "$cmd")" ]; then
+		echo "bench.sh: '$cmd' did not become known-fast; is HP_MIN_DURATION_MS 0?" >&2
+		exit 1
+	fi
+}
+
 PASSTHROUGH_CMD="curl -s https://example.invalid/health"
-BARE_CMD="echo hindsight-bench-bare"
+FAST_CMD="echo hindsight-bench-fast"
+HIT_CMD="grep -c payload bench-data.txt"
+BARE_CMD="grep -cF payload bench-data.txt"
 
 for pair in "small:$SMALL_REPO" "large:$LARGE_REPO"; do
 	name="${pair%%:*}"
@@ -420,6 +457,10 @@ for pair in "small:$SMALL_REPO" "large:$LARGE_REPO"; do
 	export HP_ENABLE=1
 
 	time_hook "passthrough" "$name" "$repo" "$PASSTHROUGH_CMD" 0
+
+	seed_fast "$repo" "$FAST_CMD"
+	time_hook "known-fast" "$name" "$repo" "$FAST_CMD" 0
+
 	time_hook "miss" "$name" "$repo" "echo hindsight-bench-miss" 1
 
 	replay="$(seed_hit "$repo" "$HIT_CMD")"
@@ -505,14 +546,20 @@ echo
 # The threshold is only interesting next to what the classifier actually lets
 # through. The policy comes from `hindsight key --cmd` rather than from a list
 # in this script, so it cannot drift from what really ships.
+#
+# Two lines matter. The measured floor is what serving genuinely costs on this
+# repository. The shipping floor is the constant `hindsight` compares against,
+# and whether the two agree is the question.
 FLOOR="$(awk '
 	$1 == "large" && $2 == "hit" { h = $3 }
 	$1 == "large" && $2 == "replay" { r = $3 }
 	END { printf("%.1f", h + r) }
 ' "$RESULTS")"
+SHIP_FLOOR="${HP_MIN_DURATION_MS:-50}"
 
-echo "measured command cost against the ${FLOOR} ms floor (large repo)"
-printf '  %-32s %-12s %10s   %s\n' "command" "policy" "median ms" "verdict"
+echo "what SERVE-eligible commands actually cost (large repo)"
+echo "  measured floor ${FLOOR} ms (hit path + replay)   shipping floor ${SHIP_FLOOR} ms"
+printf '  %-32s %-11s %9s   %s\n' "command" "classifier" "median ms" "verdict"
 while IFS= read -r probe; do
 	[ -n "$probe" ] || continue
 	# stdin is the heredoc below; anything spawned in here must not eat it.
@@ -520,12 +567,13 @@ while IFS= read -r probe; do
 		awk '$1 == "policy" { print $2 }')"
 	[ -n "$policy" ] || policy="?"
 	med="$(perl "$DRIVER" shell "$LARGE_REPO" "$probe" "$ITERATIONS" </dev/null | awk '{ print $1 }')"
-	verdict="$(awk -v m="$med" -v f="$FLOOR" -v p="$policy" 'BEGIN {
-		if (p != "SERVE") { print "not served" }
-		else if (m < f)   { print "SERVED BELOW FLOOR" }
-		else              { print "worth serving" }
+	verdict="$(awk -v m="$med" -v f="$FLOOR" -v s="$SHIP_FLOOR" -v p="$policy" 'BEGIN {
+		if (p != "SERVE")   { print "not served by the classifier" }
+		else if (m < s)     { print "below both floors; memo stops it" }
+		else if (m < f)     { print "PAST THE SHIPPING FLOOR, STILL A LOSS" }
+		else                { print "worth serving" }
 	}')"
-	printf '  %-32s %-12s %10s   %s\n' "$probe" "$policy" "$med" "$verdict"
+	printf '  %-32s %-11s %9s   %s\n' "$probe" "$policy" "$med" "$verdict"
 done <<'PROBES'
 echo hello
 pwd
@@ -537,12 +585,16 @@ head -n 5 .gitignore
 git status --porcelain
 git log --oneline -20
 git diff --stat HEAD
-grep -rn Fixture07 src
 find src -name file00001.go
+grep -rn Fixture07 src
+grep -c payload bench-data.txt
+sort bench-data.txt
 PROBES
 echo
-echo "  A command marked SERVE whose own execution is below the floor is made"
-echo "  slower by the cache on every single hit, forever."
+echo "  The classifier column is the shipping policy. A SERVE command whose own"
+echo "  execution is below the measured floor is made slower by the cache on"
+echo "  every hit; the duration memo is what has to catch it, and it only"
+echo "  catches what falls under the shipping floor."
 echo
 
 if [ "$WITH_GO" = "1" ]; then

@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hindsight — a build cache for coding agents</title>
+<meta name="description" content="Hindsight makes N parallel coding agents pay once, in total, for work all N would otherwise do independently. A cache, not a model: a served result is a replay of a command that really ran.">
+<!-- Inline data URI so a hosted copy makes no favicon request either. -->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="topbar">
+  <div class="wrap">
+    <div class="brand">
+      <span class="brand-name">HINDSIGHT</span>
+      <span class="brand-sub">build cache for parallel agents</span>
+    </div>
+    <nav class="topnav">
+      <a href="#how">How it works</a>
+      <a href="#refuses">What it refuses</a>
+      <a href="#measured">Numbers</a>
+      <a href="#install">Install</a>
+      <a href="../viewer.html">Live dashboard</a>
+      <a href="https://github.com/tjeong117/fasthack">GitHub</a>
+    </nav>
+  </div>
+</div>
+
+<main id="main">
+
+<!-- ============================================================== 1. HERO -->
+<div class="wrap hero">
+  <p class="eyebrow">A cache, not a model</p>
+  <h1>Hindsight</h1>
+
+  <p class="lede">
+    When you fan out N coding agents on one task, Hindsight makes them pay once, in
+    total, for the work all N would otherwise do independently.
+  </p>
+
+  <p class="sub">
+    A PreToolUse hook intercepts every shell command, keys it on git's own Merkle hash
+    of the live worktree plus a fingerprint of the environment, and asks a shared daemon
+    whether that exact command has already run at that exact state. If it has, the
+    recorded result is replayed instead of executed. <b>Nothing is predicted.</b> A served
+    result is a replay of something that really happened, so the failure mode is a cache
+    miss, never a wrong answer.
+  </p>
+
+  <div class="headline">
+    <div class="headline-main">
+      <div>
+        <div class="metric-label">Execution-seconds, five-agent fan-out</div>
+        <div class="metric-value">
+          <span class="from">50.1s</span>
+          <span class="arrow">&#8594;</span>
+          <span class="to">11.7s</span>
+        </div>
+      </div>
+      <div class="metric-side">
+        <div class="item">
+          <div class="k">Execution-seconds deleted</div>
+          <div class="v"><span class="on">77%</span></div>
+        </div>
+        <div class="item">
+          <div class="k">Hit rate</div>
+          <div class="v">53.3% <span class="dim" style="font-size:.62em">&mdash; 8 of 15</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="sample">
+      n = <b>15 hook-visible commands</b> &middot; 5 Claude Code agents &middot; 5 git worktrees
+      &middot; one task &middot; one machine &middot; one run. Both arms run the hook and record
+      identically; the only variable is whether hits are served.
+    </div>
+    <div class="caveat">
+      <span class="tag">Not a speedup</span>
+      <span>
+        <b>Wall clock did not improve: 30.5s baseline, 31.8s cached.</b> At this scale the
+        bottleneck is model latency, not execution, so deleted execution-seconds did not
+        become elapsed time. Execution-seconds and wall clock are different quantities and
+        we only claim the first.
+      </span>
+    </div>
+  </div>
+
+  <div class="cli">
+    <div class="cli-line"><span class="p">$</span>go build ./cmd/hindsight &amp;&amp; ./hindsight doctor</div>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/tjeong117/fasthack">GitHub</a>
+      <a class="btn" href="https://github.com/tjeong117/fasthack/blob/main/README.md">Docs</a>
+      <a class="btn" href="../viewer.html">Live dashboard</a>
+    </div>
+  </div>
+</div>
+
+<!-- =========================================================== 2. PROBLEM -->
+<section id="problem">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="sec-num">01 &mdash; The problem</p>
+      <h2>Five agents, five worktrees, one bill paid five times</h2>
+    </div>
+    <div class="prose">
+      <p>
+        Launch five agents on one bug in five git worktrees. Each one installs the same
+        dependencies, runs the same failing test to reproduce it, and reads the same files.
+        Nothing tells agent five that agent two already paid for all of it.
+      </p>
+      <p class="dim">
+        The redundancy is structural, not accidental. Agents given the same task start from
+        the same state, so they start with the same moves, and they only diverge as they
+        learn. The opening stretch is both the most redundant and the one where every agent
+        is doing it simultaneously.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================= 3. HOW IT WORKS -->
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="sec-num">02 &mdash; How it works</p>
+      <h2>Key the state, measure the purity, coalesce the fan-out</h2>
+      <p>
+        Three mechanisms. The first decides what "the same command at the same state" means,
+        the second decides what may be served at all, and the third is what makes a cold
+        fan-out worth anything.
+      </p>
+    </div>
+
+    <div class="stack">
+
+      <!-- ---------------------------------------------------- key derivation -->
+      <div>
+        <h3>The key</h3>
+        <div class="grid g2" style="align-items:start">
+          <div class="prose">
+            <p>
+              <b>tree</b> is git's own Merkle hash of the live worktree &mdash;
+              <code>git add -A</code> into a side index, then <code>git write-tree</code> &mdash;
+              so it covers uncommitted and untracked work. About 36&nbsp;ms warm on this repo.
+              The persistent side index is what makes that true; a throwaway index costs
+              220&nbsp;ms to 1.7&nbsp;s. It lives in the per-worktree git dir, because worktrees
+              sharing one index would interleave their <code>git add</code> calls and produce a
+              tree describing no real state.
+            </p>
+            <p>
+              <b>env_fp</b> covers what the tree hash structurally cannot see: installed
+              dependencies, which every ecosystem hides in a gitignored directory. Two worktrees
+              with byte-identical trees and different installed packages must not share a key
+              &mdash; that is the single hole that could make Hindsight wrong. It is a directory
+              listing, about 1&nbsp;ms, deliberately not <code>pip freeze</code>, which would cost
+              300&nbsp;ms on every command. If an ecosystem is in use but its state cannot be
+              established, the workspace is marked incomplete and nothing is served at all.
+            </p>
+            <p class="dim">
+              Environment variables are an allowlist, never the whole environment, and their
+              values are scrubbed of the worktree root and home directory before hashing.
+              Harnesses inject per-session variables that differ for every agent by
+              construction; hashing those raw would give every agent a distinct key and reduce
+              sharing to zero.
+            </p>
+          </div>
+
+          <div class="diagram">
+            <div class="dg-cap">Key derivation</div>
+            <div class="dg-row">
+              <div class="dg-node">
+                <div class="t">tree</div>
+                <div class="c">git write-tree over<br>a persistent side index<br>~36 ms warm</div>
+              </div>
+              <div class="dg-node">
+                <div class="t">env_fp</div>
+                <div class="c">interpreter, arch,<br>installed dists<br>~1 ms readdir</div>
+              </div>
+            </div>
+            <div class="dg-join"><i></i></div>
+            <div class="dg-row">
+              <div class="dg-node">
+                <div class="t">cwd_rel</div>
+                <div class="c">relative to the<br>worktree root</div>
+              </div>
+              <div class="dg-node">
+                <div class="t">cmd_norm</div>
+                <div class="c">the normalized<br>command string</div>
+              </div>
+            </div>
+            <div class="dg-join"><i></i></div>
+            <div><span class="dg-key">sha256 &rarr; hs-v1:&hellip;</span></div>
+            <div class="dg-join"><i></i></div>
+            <div class="dg-cap" style="margin-bottom:10px">Daemon lookup</div>
+            <div class="dg-out">
+              <span class="badge hit">HIT</span>
+              <span class="badge wait">LEASE_WAIT</span>
+              <span class="badge miss">MISS</span>
+              <span class="badge pass">PASSTHROUGH</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="formula" style="margin-top:22px">key = sha256(<span class="on">hs-v1</span> \0 tree \0 env_fp \0 cwd_rel \0 cmd_norm)</div>
+      </div>
+
+      <!-- ------------------------------------------------------- purity gate -->
+      <div>
+        <h3>The purity gate</h3>
+        <div class="grid g2" style="align-items:start">
+          <div class="prose">
+            <p>
+              State is recorded before and after every command, and a record is servable only
+              if both halves are unchanged. <b>Purity is measured, not declared.</b>
+            </p>
+            <p class="dim">
+              That is why this catches what a static table of "read" commands gets wrong:
+              <code>tsc</code> emits <code>.js</code>, <code>cargo test</code> writes
+              <code>target/</code>, and <code>uv sync</code> mutates a virtualenv the tree hash
+              cannot see but the fingerprint can. Installs fall out as unservable
+              automatically, rather than because somebody remembered to list them. Cost is two
+              extra hashes, about 40&nbsp;ms per command.
+            </p>
+          </div>
+          <div>
+            <div class="formula">servable  &#8660;  tree_after == tree_before
+          <span class="on">&#8743;</span>  env_fp_after == env_fp_before</div>
+            <p class="formula-note">
+              Both halves, measured on every command. A record that fails the gate is still
+              recorded for the corpus &mdash; it is simply never served.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ------------------------------------------------------ single-flight -->
+      <div>
+        <h3>Single-flight</h3>
+        <div class="prose" style="margin-bottom:22px">
+          <p>
+            A cold fan-out gets nothing from a naive cache: five agents launched at once run
+            the same first command simultaneously, so nobody has finished yet and all five pay
+            &mdash; precisely across the opening stretch where overlap is highest. The daemon
+            keeps an in-flight lease per key. The first caller executes; the rest block and are
+            served its result. If the holder dies the lease expires and the waiters execute
+            normally rather than hanging.
+          </p>
+          <p class="dim">
+            Measured on a five-worktree cold fan-out where all five agents run the same
+            expensive command simultaneously: <b>one execution, four served.</b>
+          </p>
+        </div>
+
+        <div class="scroll">
+          <table class="trace">
+            <caption>Decision trace &mdash; the measured five-agent run, 15 hook-visible commands</caption>
+            <thead>
+              <tr>
+                <th>Agent</th><th>Decision</th><th class="n">Duration</th>
+                <th>Policy / source</th><th>Command</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="flat">
+                <td>a1&hellip;a5</td><td><span class="badge miss">MISS</span></td>
+                <td class="n">~0.5s each</td><td>RECORD_ONLY</td><td>uv sync --extra dev</td>
+              </tr>
+              <tr>
+                <td>a2</td><td><span class="badge miss">MISS</span></td>
+                <td class="n">4634 ms</td><td>SERVE</td><td>uv run pytest -q</td>
+              </tr>
+              <tr>
+                <td>a1, a4, a5</td><td><span class="badge wait">LEASE_WAIT</span></td>
+                <td class="n on">4634 ms</td><td>from a2</td><td>uv run pytest -q</td>
+              </tr>
+              <tr>
+                <td>a3</td><td><span class="badge hit">HIT</span></td>
+                <td class="n on">4634 ms</td><td>from a2</td><td>uv run pytest -q</td>
+              </tr>
+              <tr>
+                <td>a2</td><td><span class="badge miss">MISS</span></td>
+                <td class="n">4278 ms</td><td>SERVE</td><td>uv run pytest -q &nbsp;(post-fix)</td>
+              </tr>
+              <tr>
+                <td>a1, a5</td><td><span class="badge wait">LEASE_WAIT</span></td>
+                <td class="n on">4278 ms</td><td>from a2</td><td>uv run pytest -q</td>
+              </tr>
+              <tr>
+                <td>a3, a4</td><td><span class="badge hit">HIT</span></td>
+                <td class="n on">4278 ms</td><td>from a2</td><td>uv run pytest -q</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="dim" style="font-size:14.5px;margin-top:16px;max-width:var(--measure)">
+          Both test rounds collapse from five executions to one. Installs correctly never enter
+          the lease path and run in parallel. The second round is worth dwelling on: all five
+          agents independently produced a byte-identical fix, which means a byte-identical tree,
+          which means they share the post-fix entry automatically. Nobody copied anybody's patch.
+        </p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================== 4. WHAT IT REFUSES -->
+<section id="refuses">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="sec-num">03 &mdash; What it refuses to cache</p>
+      <h2>The refusals are the product</h2>
+      <p>
+        There is no <code>deny</code>. In Codex, <code>permissionDecision: "deny"</code> blocks
+        the tool call outright, and an agent that cannot run <code>curl</code> is broken. A
+        refusal means the command runs normally &mdash; it just never comes back from the cache.
+      </p>
+    </div>
+
+    <div class="scroll" style="margin-bottom:clamp(22px,3vw,34px)">
+      <table class="policy">
+        <caption>Exactly three policy values</caption>
+        <tbody>
+          <tr><th>SERVE</th><td>Eligible to be replayed, subject to the purity gate.</td></tr>
+          <tr><th>RECORD_ONLY</th><td>Runs normally, recorded for the corpus, never served.</td></tr>
+          <tr><th>PASSTHROUGH</th><td>Runs normally, records nothing. The default for anything unrecognized.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <div class="metric-label">Non-hermetic commands</div>
+        <p>
+          <code>date</code>, <code>curl</code>, <code>$RANDOM</code>, <code>git push</code>,
+          <code>uuidgen</code>, <code>hostname</code>, command substitution, piping into a shell.
+          These are pure <i>by state</i> and still wrong to serve, because state hashing is blind
+          to nondeterminism. <b>This list is correctness, not polish.</b>
+        </p>
+      </div>
+      <div class="card">
+        <div class="metric-label">Installs</div>
+        <p>
+          <code>uv sync</code> and <code>pip install</code> mutate a virtualenv the tree hash
+          cannot see &mdash; but the environment fingerprint can, so they fall to unservable by
+          measurement. Serving the transcript alone would hand the next agent a recorded
+          "installed" message and no <code>.venv</code>. They stay unservable until an artifact
+          guard can replay the produced directory rather than the text.
+        </p>
+      </div>
+      <div class="card">
+        <div class="metric-label">Anything that dirties the workspace</div>
+        <p>
+          Caught by measurement rather than by a list: if <code>tree_after</code> or
+          <code>env_fp_after</code> moved, the record is never servable. <code>tsc</code>,
+          <code>cargo test</code> and <code>go test -c</code> all look like reads and are not.
+        </p>
+      </div>
+      <div class="card">
+        <div class="metric-label">Code edits</div>
+        <p>
+          An edit is a decision, not an observation. Letting agent two inherit agent one's patch
+          collapses five independent searches into one and destroys the reason to fan out.
+          <b>Consequences are shared, never the patch:</b> if two agents independently converge on
+          an identical tree, they share every downstream entry for free.
+        </p>
+      </div>
+    </div>
+
+    <div class="note-card warn" style="margin-top:clamp(22px,3vw,34px)">
+      <div class="metric-label">File metadata &mdash; the case verification found in production</div>
+      <div class="prose">
+        <p>
+          On the first real fleet run, shadow verification flagged <code>ls -la</code> as
+          divergent. That was not a harness artifact. Long listings print mtimes, sizes and
+          ownership, and git's tree hash deliberately covers none of them, so two worktrees with
+          byte-identical trees legitimately produce different output. The key did not dominate
+          the output.
+        </p>
+        <p class="dim">
+          Nothing else would have caught it. The command mutates nothing, so the purity gate saw
+          identical state before and after and was satisfied. It is not nondeterministic in the
+          <code>date</code> or <code>$RANDOM</code> sense, so nothing about it looked suspicious.
+          Only re-executing it and comparing surfaced the problem. <code>ls -l</code>,
+          <code>stat</code>, <code>du</code> and <code>df</code> are now passthrough; plain
+          <code>ls</code> prints names only and remains servable.
+        </p>
+      </div>
+    </div>
+
+    <p class="dim" style="margin-top:22px;font-size:14.5px;max-width:var(--measure)">
+      Chains split on <code>&amp;&amp;</code>, <code>||</code>, <code>;</code> and
+      <code>|</code>, and the strictest segment wins, so <code>ls &amp;&amp; curl example.com</code>
+      is passthrough.
+    </p>
+  </div>
+</section>
+
+<!-- ======================================================== 5. VERIFICATION -->
+<section id="verify">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="sec-num">04 &mdash; How you know it isn't lying</p>
+      <h2>Served results are re-executed behind your back</h2>
+      <p>
+        <code>hindsight verify</code> re-executes commands the cache is willing to serve and
+        diffs the result against what would have been served, evicting anything that disagrees.
+      </p>
+    </div>
+
+    <div class="verifybar" style="margin-bottom:clamp(22px,3vw,32px)">
+      <div class="cell"><div class="k">Served</div><div class="v">7</div></div>
+      <div class="cell"><div class="k">Verified</div><div class="v">5</div></div>
+      <div class="cell ok"><div class="k">Divergent</div><div class="v">0</div></div>
+      <div class="note">
+        Counters from a live run. Verification is asynchronous, so verified trails served while
+        re-executions are still in flight.
+      </div>
+    </div>
+
+    <div class="grid g3">
+      <div class="card">
+        <div class="metric-label">In the state it was recorded in</div>
+        <p>
+          Shadow verification runs agent-side, because the daemon has no worktree and a replay
+          only means anything in the state it was recorded in. Records whose workspace has moved
+          on are skipped rather than judged.
+        </p>
+      </div>
+      <div class="card">
+        <div class="metric-label">Diffed after normalization</div>
+        <p>
+          Test runners print durations, temp paths and per-worktree absolute paths that
+          legitimately differ between two correct runs. A raw byte-diff would report divergence
+          on nearly every hit and the counter would be worthless. Both verdicts are reported, so
+          a byte-identical match stays visible.
+        </p>
+      </div>
+      <div class="card">
+        <div class="metric-label">Divergence is loud</div>
+        <p>
+          Tested against a deliberately poisoned blob: detected, reported as
+          <code>CACHE_MISMATCH</code>, evicted, nonzero exit. The deny-list will always be
+          incomplete. <b>This is the mechanism that tells you where.</b>
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 6. MEASURED -->
+<section id="measured">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="sec-num">05 &mdash; Measured</p>
+      <h2>Every number with its denominator</h2>
+      <p>
+        Each time we looked harder at the headline figure it went down, and we published the
+        lower one. Three measurements follow, in decreasing order of how flattering they are.
+      </p>
+    </div>
+
+    <div class="stack">
+
+      <!-- real agents -->
+      <div>
+        <h3>Real agents &mdash; n = 15 commands</h3>
+        <div class="grid g2" style="align-items:start">
+          <div class="scroll">
+            <table>
+              <caption>Five Claude Code agents, five worktrees, one repo, one run</caption>
+              <thead><tr><th></th><th class="n">baseline</th><th class="n">cached</th></tr></thead>
+              <tbody>
+                <tr><th>hook-visible commands</th><td class="n">15</td><td class="n">15</td></tr>
+                <tr><th>executed</th><td class="n">15</td><td class="n">7</td></tr>
+                <tr><th>served</th><td class="n">0</td><td class="n on">8 <span class="dim">(5 coalesced)</span></td></tr>
+                <tr><th>execution-seconds</th><td class="n">50.1s</td><td class="n on">11.7s</td></tr>
+                <tr><th>hit rate</th><td class="n">0%</td><td class="n on">53.3%</td></tr>
+                <tr class="flat"><th>wall clock</th><td class="n">30.5s</td><td class="n on">31.8s</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="prose">
+            <p>
+              <b>77% of execution-seconds deleted</b>, on 15 hook-visible commands. The cached
+              arm's counterfactual is 47.3s against a measured baseline of 50.1s, a 5.6% gap
+              between two independent measurements of the same quantity.
+            </p>
+            <ul class="bullets">
+              <li><b>Wall clock did not improve</b> &mdash; 30.5s to 31.8s. Execution dominates wall clock when the suite takes minutes, not seconds.</li>
+              <li><b>n is 15 commands, one task, one machine.</b> Modern agents use native Read and Edit tools for file work, so only about three Bash commands per agent reach the hook at all. What remains is almost entirely the expensive class, which is favourable, but one run is not a distribution.</li>
+              <li><b>Round-two sharing depended on convergent fixes.</b> All five agents produced a byte-identical patch. A bug with several valid fixes would leave them at different trees and those hits would disappear.</li>
+              <li><b>The install pool is still invisible.</b> <code>uv</code> resolved from a warm global cache in under a second here. On a cold cache or with pip, install is the largest single pool.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- synthetic control -->
+      <div>
+        <h3>Synthetic control &mdash; n = 35 commands</h3>
+        <div class="grid g2" style="align-items:start">
+          <div class="scroll">
+            <table>
+              <caption>Same harness, fixed command script instead of a model</caption>
+              <thead><tr><th></th><th class="n">baseline</th><th class="n">cached</th></tr></thead>
+              <tbody>
+                <tr><th>commands demanded</th><td class="n">35</td><td class="n">35</td></tr>
+                <tr><th>executed</th><td class="n">35</td><td class="n">6</td></tr>
+                <tr><th>served</th><td class="n">0</td><td class="n on">29 <span class="dim">(24 coalesced)</span></td></tr>
+                <tr><th>execution-seconds</th><td class="n">34.1s</td><td class="n on">3.0s</td></tr>
+                <tr><th>hit rate</th><td class="n">0%</td><td class="n on">82.9%</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="prose">
+            <p>
+              Removing the model removes run-to-run variance, so the two arms are exactly
+              comparable. Both caveats make the number <i>conservative</i> rather than flattering.
+            </p>
+            <p class="dim">
+              The cached arm's internal counterfactual is 26.7s against a measured baseline of
+              34.1s. The gap is CPU contention: the baseline runs five expensive commands
+              concurrently and each is slowed by the others, while the cached arm executes one at
+              a time and records an uncontended duration. Pricing avoided work at uncontended
+              speed understates what was avoided.
+            </p>
+            <p class="dim">
+              On a lighter workload where contention is negligible the two reconcile closely:
+              25.0s counterfactual against a 25.3s measured baseline, a 1.2% gap. That agreement
+              between two independent measurements is the number worth trusting.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- corpus floor -->
+      <div>
+        <h3>Replayed corpus &mdash; n = 12,806 commands</h3>
+        <div class="grid g2" style="align-items:start">
+          <div class="card">
+            <div class="metric-label">Cross-agent reuse under the shipping policy</div>
+            <div class="metric-value" style="font-size:clamp(40px,6vw,64px)">
+              <span class="to">3.6%</span>
+            </div>
+            <p style="margin-top:14px">
+              of 12,806 real agent commands. Total avoidable under the same keying is
+              <b>7.5% of 12,806</b>; the rest is agents repeating themselves, which is not an
+              argument for fanning out. Command-string matching alone gives 16.6% of 12,806 and
+              overstates what can actually be served.
+            </p>
+          </div>
+          <div class="prose">
+            <p>
+              This is a much smaller number than 53.3%, and it belongs here. Keyed the way
+              Hindsight actually keys &mdash; on <code>(state, command)</code> rather than on the
+              command string &mdash; the honest decay is <b>16.9% of commands in the opening
+              three steps</b>, falling to <b>1.0% of commands after step 50</b>.
+            </p>
+            <p class="dim">
+              <b>It is a floor, not an estimate.</b> All 25 tasks in that corpus mix different
+              models (haiku, sonnet, opus) rather than running N instances of one agent, and each
+              starts from a pre-built container, so setup is nearly absent. Both push the figure
+              down relative to the homogeneous fan-out Hindsight targets, which is what the 53.3%
+              measured on a real fan-out reflects. The gap between those two numbers is large and
+              we do not have a principled interpolation between them.
+            </p>
+            <p class="dim">
+              12,806 is the raw command count across multi-agent tasks. Deduplicated it is 11,687.
+              This page uses the raw count throughout.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!--
+        =====================================================================
+        PLACEHOLDER — larger experiment on a real repository.
+
+        A larger fan-out on a real repository is running at the time of
+        writing. When it lands, replace the .pending block below with a
+        headline the same shape as the two above:
+
+          - execution-seconds baseline -> cached, and % deleted
+          - hit rate with its denominator (X of N hook-visible commands)
+          - wall clock for both arms, stated even if it did not move
+          - agent count, repo, and whether the baseline arm was measured
+            with the hook enabled and serving disabled
+
+        Do NOT publish a number here without a measured baseline arm beside
+        it. Do not invent one. The surrounding structure needs no changes.
+        =====================================================================
+      -->
+      <div class="pending">
+        <div class="metric-label"><span class="pulse-dot"></span>Larger repository &mdash; running now</div>
+        <div class="prov">&mdash;&mdash;&mdash;</div>
+        <p>
+          <b>Provisional: no number published.</b> A larger fan-out on a real repository is in
+          flight. Nothing goes here until it has a measured baseline arm beside it, recorded with
+          the hook enabled and serving disabled, so that the only variable is the serve decision.
+        </p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================= 7. INSTALL -->
+<section id="install">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="sec-num">06 &mdash; Install and quickstart</p>
+      <h2>Go standard library, one static binary</h2>
+      <p>
+        Dependencies: the Go standard library, and nothing else. Storage is an append-only
+        JSONL log plus content-addressed blob files.
+      </p>
+    </div>
+
+    <div class="grid g2" style="align-items:start">
+      <div>
+        <pre><span class="p">$</span> go build ./cmd/hindsight
+
+<span class="p">$</span> ./hindsight doctor                    <span class="c"># can this workspace be cached safely?</span>
+<span class="p">$</span> ./hindsight init                      <span class="c"># install the PreToolUse hook</span>
+<span class="p">$</span> ./hindsight doctor --ensure-daemon    <span class="c"># start the shared daemon</span>
+
+<span class="p">$</span> <span class="on">HP_ENABLE=1</span> claude
+<span class="c"># or: </span><span class="on">HP_ENABLE=1</span> codex exec --dangerously-bypass-hook-trust</pre>
+        <p class="dim" style="font-size:14.5px;margin-top:16px">
+          <code>doctor</code> is the first thing to run and the first thing to run again when
+          something looks wrong. It checks that the tree hash works and how much it costs, that
+          every dependency ecosystem in the repo is covered by the fingerprint, that the cache
+          lives outside the worktree, and that the hook is installed and points at a binary that
+          exists. It exits non-zero if any of that fails, and <code>--json</code> gives the same
+          answer to a script.
+        </p>
+      </div>
+
+      <div>
+        <div class="note-card" style="margin-bottom:22px">
+          <div class="metric-label">The hook is inert unless HP_ENABLE=1</div>
+          <p class="dim" style="font-size:15px;margin:0">
+            That is deliberate: this repo installs a hook into its own config, so an armed hook
+            would intercept the very session you use to work on the hook.
+          </p>
+        </div>
+        <div class="scroll">
+          <table>
+            <caption>Environment</caption>
+            <thead><tr><th>Variable</th><th>Default</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><th>HP_ENABLE</th><td>unset</td><td><code>1</code> arms the hook. Nothing happens without it.</td></tr>
+              <tr><th>HP_SERVE</th><td>1</td><td><code>0</code> records everything and serves nothing &mdash; the control arm.</td></tr>
+              <tr><th>HP_DAEMON</th><td>127.0.0.1:7777</td><td>Shared daemon.</td></tr>
+              <tr><th>HP_HOME</th><td>~/.hindsight/&lt;repo-id&gt;</td><td>Cache root. Must be outside the worktree.</td></tr>
+              <tr><th>HP_AGENT</th><td>local</td><td>Agent id, used for provenance on served results.</td></tr>
+              <tr><th>HP_DEBUG</th><td>unset</td><td><code>1</code> sends diagnostics to stderr. Never to stdout.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="dim" style="font-size:14.5px;margin-top:16px">
+          Other subcommands: <code>hindsight key</code> prints the tree hash and environment
+          fingerprint, <code>hindsight stats</code> prints counters from the daemon,
+          <code>hindsight verify</code> re-executes served results and diffs them, and
+          <code>hindsight replay</code> reports what a recorded trace would have saved.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 8. WHAT WE DO NOT CLAIM -->
+<section id="notclaim">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="sec-num">07 &mdash; What we do not claim</p>
+      <h2>The negatives are the credibility</h2>
+      <p>
+        Reproduced from the design doc, in full, because every one of these is a place where a
+        number could have been made to look better and was not.
+      </p>
+    </div>
+
+    <ul class="claims">
+      <li>
+        <h4>We do not claim "N&times; faster" without the measured baseline arm.</h4>
+        <p>The control runs with the hook enabled and serving disabled, so both arms carry identical instrumentation and the only variable is the serve decision. A control measured differently from the treatment is not a control.</p>
+      </li>
+      <li>
+        <h4>We do not claim a wall-clock speedup.</h4>
+        <p>The measured fan-out deleted <b>77% of execution-seconds across 15 commands</b> and moved wall clock by nothing &mdash; 30.5s to 31.8s &mdash; because model latency dominated. Those are different quantities and we only claim the first.</p>
+      </li>
+      <li>
+        <h4>We do not claim it prevents mistakes.</h4>
+        <p>It deletes duplicated work. That is all.</p>
+      </li>
+      <li>
+        <h4>We do not predict anything.</h4>
+        <p>There is no model in the system, and that is the cleanest defence available.</p>
+      </li>
+      <li>
+        <h4>Published overlap figures match on the command string alone, and they overstate what we can serve.</h4>
+        <p>Keyed the way Hindsight actually keys, on <code>(state, command)</code>, the same corpus gives <b>7.5% of 12,806 commands avoidable, of which only 3.6% of 12,806 is cross-agent</b> &mdash; the rest is agents repeating themselves. Against 16.6% of 12,806 for command-string matching. The honest decay is 16.9% of commands in the opening three steps, falling to 1.0% after step 50.</p>
+      </li>
+      <li>
+        <h4>That corpus measures a different population than we target.</h4>
+        <p>All 25 tasks mix different models rather than N instances of one agent, and each starts from a pre-built container so setup is nearly absent. Both make 3.6% a floor rather than an estimate, which the 53.3% measured on a real homogeneous fan-out bears out. But the gap between those two numbers is large and we do not have a principled interpolation between them.</p>
+      </li>
+      <li>
+        <h4>The corpus is a partial run.</h4>
+        <p>265 records against a manifest describing 736, roughly a third.</p>
+      </li>
+      <li>
+        <h4>11,687 is a deduplicated command count.</h4>
+        <p>Raw is 12,806. Pick one, say which, never mix them.</p>
+      </li>
+      <li>
+        <h4>The per-class seconds in the value table are modelled, not measured.</h4>
+        <p>Hit counts are real; the seconds come from hardcoded per-class costs. The live counter uses real durations from the fleet run instead.</p>
+      </li>
+      <li>
+        <h4>The multi-developer case is untested.</h4>
+        <p>The corpus is independent attempts at one task.</p>
+      </li>
+      <li>
+        <h4>Hindsight shares observations, never decisions.</h4>
+        <p>Route-sharing between agents is deliberately out of scope. The transition corpus is what would make it approachable later; this is the foundation for that idea, not a retreat from it.</p>
+      </li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <p>
+        Hindsight is a build cache. We do not describe it as turning your codebase into a world
+        model. The leakage rule it holds &mdash; that only a real action with a subsequently
+        observed response may enter the index, never a generated prediction, simulator rollout,
+        teacher datum or judgment &mdash; is adopted from Experiential Labs (Apache-2.0, with
+        attribution), because they state it better than we would.
+      </p>
+    </div>
+    <div class="footlinks">
+      <a href="https://github.com/tjeong117/fasthack">GitHub</a>
+      <a href="https://github.com/tjeong117/fasthack/blob/main/README.md">README</a>
+      <a href="https://github.com/tjeong117/fasthack/blob/main/design_doc.md">Design doc</a>
+      <a href="../viewer.html">Live dashboard</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
