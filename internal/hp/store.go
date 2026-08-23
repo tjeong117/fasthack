@@ -35,6 +35,10 @@ type Record struct {
 	StderrBlob  string  `json:"stderr_blob"`
 	SourceAgent string  `json:"source_agent"`
 	Verified    *bool   `json:"verified"`
+	// Tier is 0 for an exact tree match and 1 when diff-disjoint scoping
+	// promoted a different tree. A judge should be able to see which hits
+	// relied on the weaker argument.
+	Tier int `json:"tier"`
 }
 
 // Decisions.
@@ -122,14 +126,30 @@ type Store struct {
 
 	mu       sync.RWMutex
 	servable map[string]*Record // key -> best servable record
-	all      []*Record
+	// candidates indexes servable records by everything in the key *except*
+	// the tree hash. A tree miss looks here for records of the same command,
+	// in the same directory, under the same environment, that were recorded at
+	// some other tree — the population Tier-1 scoping can try to promote.
+	candidates map[string][]*Record
+	all        []*Record
+}
+
+// candKey is the key minus the tree. Command, directory and environment must
+// all still match exactly; only the workspace contents are allowed to differ,
+// and Tier-1 then has to prove that difference is irrelevant.
+func candKey(cmdNorm, cwdRel, envFP string) string {
+	return cmdNorm + "\x00" + cwdRel + "\x00" + envFP
 }
 
 func OpenStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "blobs"), 0o755); err != nil {
 		return nil, err
 	}
-	s := &Store{Paths: Paths{dir: dir}, servable: map[string]*Record{}}
+	s := &Store{
+		Paths:      Paths{dir: dir},
+		servable:   map[string]*Record{},
+		candidates: map[string][]*Record{},
+	}
 	if err := s.replay(); err != nil {
 		return nil, err
 	}
@@ -167,11 +187,47 @@ func (s *Store) ingest(r *Record) {
 	s.all = append(s.all, r)
 	if r.Servable && r.Key != "" {
 		if r.Verified != nil && !*r.Verified {
-			delete(s.servable, r.Key) // an eviction from shadow verification
+			s.dropServable(r.Key) // an eviction from shadow verification
 			return
 		}
 		s.servable[r.Key] = r
+		ck := candKey(r.CmdNorm, r.CwdRel, r.EnvFPBefore)
+		s.candidates[ck] = append(s.candidates[ck], r)
 	}
+}
+
+// dropServable removes a key from both indexes. Forgetting the candidate index
+// would let an evicted record come back through Tier-1, which is worse than
+// never having evicted it.
+func (s *Store) dropServable(key string) {
+	rec, ok := s.servable[key]
+	if !ok {
+		return
+	}
+	delete(s.servable, key)
+	ck := candKey(rec.CmdNorm, rec.CwdRel, rec.EnvFPBefore)
+	kept := s.candidates[ck][:0]
+	for _, c := range s.candidates[ck] {
+		if c.Key != key {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) == 0 {
+		delete(s.candidates, ck)
+	} else {
+		s.candidates[ck] = kept
+	}
+}
+
+// Candidates returns servable records for the same command, directory and
+// environment recorded at a different tree.
+func (s *Store) Candidates(cmdNorm, cwdRel, envFP string) []*Record {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	src := s.candidates[candKey(cmdNorm, cwdRel, envFP)]
+	out := make([]*Record, len(src))
+	copy(out, src)
+	return out
 }
 
 // Append writes one record and updates the index. The daemon is the only
@@ -208,7 +264,7 @@ func (s *Store) Lookup(key string) (*Record, bool) {
 func (s *Store) Evict(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.servable, key)
+	s.dropServable(key)
 }
 
 // PutBlob content-addresses a byte slice and returns "sha256:<hex>".

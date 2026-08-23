@@ -251,11 +251,22 @@ func perfBuildNodeModules(tb testing.TB, root string) {
 	}
 }
 
-// perfDirty rewrites the first count files with fresh content, so the next
-// tree hash has exactly that many blobs to recompute.
-func perfDirty(tb testing.TB, r *perfRepo, count, gen int) {
+// perfDirtyGen makes every rewrite produce content git has never seen, and is
+// seeded from the clock so that a second run against the cached fixture does
+// not replay the first run's content.
+//
+// This matters more than it looks. `git add -A` writes a new blob object for
+// content it does not already have, and skips the write for content it does.
+// Repeating the same few generations measured five times faster than writing
+// fresh content, which is not what an agent editing files produces.
+var perfDirtyGen = int(time.Now().UnixNano() % 1e9)
+
+// perfDirty rewrites the first count files with content nothing has seen, so
+// the next tree hash has exactly that many blobs to hash and store.
+func perfDirty(tb testing.TB, r *perfRepo, count int) {
+	perfDirtyGen++
 	for i := 0; i < count && i < len(r.files); i++ {
-		perfWrite(tb, filepath.Join(r.root, r.files[i]), perfFileBody(r.files[i], gen))
+		perfWrite(tb, filepath.Join(r.root, r.files[i]), perfFileBody(r.files[i], perfDirtyGen))
 	}
 }
 
@@ -364,7 +375,7 @@ func BenchmarkTreeHashDirty(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
-				perfDirty(b, r, changed, i+1)
+				perfDirty(b, r, changed)
 				b.StartTimer()
 				if _, err := r.ws.TreeHash(); err != nil {
 					b.Fatal(err)

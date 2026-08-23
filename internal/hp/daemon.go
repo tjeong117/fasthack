@@ -105,6 +105,19 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Tier 1. The tree differs, but the difference may be provably irrelevant
+	// to this command. This is where the value is: exact-tree matching
+	// collapses the moment agents start editing, and everything after that
+	// point is only recoverable by proving disjointness.
+	if rec, dec := s.tryScope(&req); rec != nil {
+		resp := hitResp(rec, 0)
+		resp.Tier = 1
+		resp.ScopeReason = dec.Reason
+		s.emitScopedHit(&req, rec, dec)
+		writeJSON(w, resp)
+		return
+	}
+
 	waited, served := s.waitForPeer(req.Key)
 	if served != nil {
 		s.emitDecision(&req, DecisionLeaseWait, served, waited)
@@ -115,6 +128,57 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 	s.acquire(req.Key, req.Agent)
 	s.emitDecision(&req, DecisionMiss, nil, waited)
 	writeJSON(w, LookupResp{Decision: DecisionMiss, WaitedMS: waited})
+}
+
+// tryScope looks for a record of the same command, in the same directory,
+// under the same environment, recorded at a different tree, and asks whether
+// the difference between those trees can affect this command.
+//
+// Bounded deliberately: each candidate costs a git diff-tree, and this sits on
+// the hook's critical path. Trying a handful of the most recent is worth it;
+// trying every historical tree is not.
+func (s *Server) tryScope(req *LookupReq) (*Record, ScopeDecision) {
+	if req.RepoRoot == "" || req.Tree == "" {
+		return nil, ScopeDecision{Reason: "no repo root supplied"}
+	}
+	cands := s.store.Candidates(req.CmdNorm, req.CwdRel, req.EnvFP)
+	const maxCandidates = 8
+	if len(cands) > maxCandidates {
+		cands = cands[len(cands)-maxCandidates:]
+	}
+	var last ScopeDecision
+	for i := len(cands) - 1; i >= 0; i-- {
+		c := cands[i]
+		if c.TreeBefore == req.Tree {
+			continue // Tier 0 already had its chance
+		}
+		dec := ScopeMatch(req.RepoRoot, c.TreeBefore, req.Tree, req.Cmd)
+		if dec.Promoted {
+			return c, dec
+		}
+		last = dec
+	}
+	return nil, last
+}
+
+func (s *Server) emitScopedHit(req *LookupReq, src *Record, dec ScopeDecision) {
+	rec := &Record{
+		V: 1, TS: float64(time.Now().UnixMilli()) / 1000,
+		Agent: req.Agent, Cmd: req.Cmd, CmdNorm: req.CmdNorm, CwdRel: req.CwdRel,
+		TreeBefore: req.Tree, EnvFPBefore: req.EnvFP,
+		Key: req.Key, Policy: req.Policy, Decision: DecisionHit, Tier: 1,
+		Reason:      "tier-1: " + dec.Reason,
+		DurationMS:  src.DurationMS,
+		ExitCode:    src.ExitCode,
+		StdoutBlob:  src.StdoutBlob,
+		StderrBlob:  src.StderrBlob,
+		SourceAgent: src.Agent,
+	}
+	if err := s.store.Append(rec); err != nil {
+		log.Printf("hindsight: append failed: %v", err)
+	}
+	s.broadcast(map[string]any{"type": "decision", "record": rec})
+	s.broadcastStats()
 }
 
 // waitForPeer blocks while another agent is executing this exact command at
@@ -292,6 +356,7 @@ func (s *Server) emitDecision(req *LookupReq, decision string, src *Record, wait
 // Stats is the counter the viewer renders.
 type Stats struct {
 	Served         int     `json:"served"`
+	Tier1          int     `json:"tier1"`
 	Executed       int     `json:"executed"`
 	SecondsDeleted float64 `json:"seconds_deleted"`
 	SecondsSpent   float64 `json:"seconds_spent"`
@@ -313,6 +378,9 @@ func (s *Server) stats() Stats {
 		case DecisionHit, DecisionLeaseWait:
 			st.Served++
 			st.SecondsDeleted += float64(r.DurationMS) / 1000
+			if r.Tier == 1 {
+				st.Tier1++
+			}
 		case DecisionMiss:
 			st.Executed++
 			st.SecondsSpent += float64(r.DurationMS) / 1000

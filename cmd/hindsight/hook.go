@@ -92,7 +92,8 @@ func cmdHook(args []string) error {
 		Key: key, Agent: hp.AgentID(), Cmd: in.ToolInput.Command, CmdNorm: cmdNorm,
 		CwdRel: cwdRel, Tree: state.Tree, EnvFP: state.EnvFP,
 		Policy: policy.String(), Reason: reason,
-		Serve: hp.ServeEnabled() && policy == hp.SERVE,
+		Serve:    hp.ServeEnabled() && policy == hp.SERVE,
+		RepoRoot: ws.Root,
 	})
 	if err != nil {
 		hp.Debugf("daemon unreachable, passing through: %v", err)
@@ -109,9 +110,13 @@ func cmdHook(args []string) error {
 		out := shellQuote(store.BlobPath(resp.StdoutBlob))
 		errp := shellQuote(store.BlobPath(resp.StderrBlob))
 		served := fmt.Sprintf("cat %s; cat %s >&2; exit %d", out, errp, resp.ExitCode)
-		hp.Debugf("HIT key=%s from=%s saved=%dms", key, resp.SourceAgent, resp.DurationMS)
-		return hp.Rewrite(os.Stdout, harness, served,
-			fmt.Sprintf("hindsight: served from %s (%dms deleted)", resp.SourceAgent, resp.DurationMS))
+		hp.Debugf("HIT tier=%d key=%s from=%s saved=%dms %s",
+			resp.Tier, key, resp.SourceAgent, resp.DurationMS, resp.ScopeReason)
+		note := fmt.Sprintf("hindsight: served from %s (%dms deleted)", resp.SourceAgent, resp.DurationMS)
+		if resp.Tier == 1 {
+			note += " [tier-1: " + resp.ScopeReason + "]"
+		}
+		return hp.Rewrite(os.Stdout, harness, served, note)
 	}
 
 	// Miss. Wrap the real execution so its result is recorded for everyone

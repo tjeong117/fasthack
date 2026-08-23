@@ -29,6 +29,12 @@ DAEMON="${HP_DAEMON:-http://127.0.0.1:7777}"
 OUT=""
 REF="HEAD"
 KEEP=0
+# Verification runs by default in the cached arm. It is the answer to "how do
+# you know it isn't lying to you", and a default-off credibility check is a
+# credibility check that never runs.
+VERIFY=1
+VERIFY_LIMIT=25
+HINDSIGHT="${HINDSIGHT_BIN:-hindsight}"
 DRY_RUN=0
 AGENT_TIMEOUT=900
 HP_HOME_OPT="${HP_HOME:-}"
@@ -64,6 +70,8 @@ OPTIONS
   --hp-home <dir>          Force $HP_HOME for the agents and for the summary.
   --timeout <secs>         Per-agent wall-clock kill (0 disables).     [900]
   --keep                   Do not remove the worktrees on exit.
+  --no-verify              Skip shadow re-execution of served results.
+  --verify-limit <N>       How many served results to re-execute.        [25]
   --dry-run                Create the worktrees, print exactly what would be
                            launched, then exit without invoking any model.
   -h, --help               This text.
@@ -175,6 +183,8 @@ while [ $# -gt 0 ]; do
 	--timeout=*) AGENT_TIMEOUT="${1#*=}"; shift ;;
 	--timeout) need "$1" $#; AGENT_TIMEOUT="$2"; shift 2 ;;
 	--keep) KEEP=1; shift ;;
+	--no-verify) VERIFY=0; shift ;;
+	--verify-limit) VERIFY_LIMIT="$2"; shift 2 ;;
 	--dry-run) DRY_RUN=1; shift ;;
 	-h | --help) usage; exit 0 ;;
 	--) shift; while [ $# -gt 0 ]; do POSITIONAL[${#POSITIONAL[@]}]="$1"; shift; done ;;
@@ -592,6 +602,30 @@ LOG_PATH="$(resolve_log || true)"
 		"$(printf '%d.%01d' $((SLOWEST_MS / 1000)) $(((SLOWEST_MS % 1000) / 100)))"
 	printf '\n'
 } | tee "$OUT/summary.txt"
+
+# Shadow verification, before the worktrees are removed.
+#
+# A served result is only worth anything if we can show it matches a real
+# re-execution, and that check is only meaningful in the worktree and state it
+# was recorded in — which exists right now and will not in a moment. Running it
+# afterwards is why the first real fan-out reported "verified 0" while serving
+# 29 results: the mechanism was built and never fired.
+if [ "$MODE" = "cached" ] && [ "$VERIFY" = 1 ] && [ ${#WORKTREES[@]} -gt 0 ]; then
+	{
+		printf '\n  shadow verification\n'
+		verify_wt="${WORKTREES[0]}"
+		if [ -d "$verify_wt" ]; then
+			(
+				cd "$verify_wt" || exit 1
+				export HP_ENABLE=1 HP_DAEMON="$DAEMON"
+				if [ -n "$HP_HOME_OPT" ]; then export HP_HOME="$HP_HOME_OPT"; fi
+				"$HINDSIGHT" verify --limit "$VERIFY_LIMIT" --quiet 2>&1 | sed 's/^/  /'
+			) || printf '  (divergence found — see above)\n'
+		else
+			printf '  skipped: no worktree left to verify in\n'
+		fi
+	} | tee -a "$OUT/summary.txt"
+fi
 
 if [ "$HAVE_PY" = 1 ] && [ -f "$LOG_PATH" ]; then
 	python3 - "$LOG_PATH" "$RUN_START_EPOCH" "$OUT/summary.json" "$MODE" "$AGENTS" "$FLEET_WALL_MS" <<'PY' | tee -a "$OUT/summary.txt"

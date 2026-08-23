@@ -515,9 +515,11 @@ echo "measured command cost against the ${FLOOR} ms floor (large repo)"
 printf '  %-32s %-12s %10s   %s\n' "command" "policy" "median ms" "verdict"
 while IFS= read -r probe; do
 	[ -n "$probe" ] || continue
-	policy="$(cd "$LARGE_REPO" && "$BIN" key --cmd "$probe" 2>/dev/null | awk '$1 == "policy" { print $2 }')"
+	# stdin is the heredoc below; anything spawned in here must not eat it.
+	policy="$(cd "$LARGE_REPO" && "$BIN" key --cmd "$probe" 2>/dev/null </dev/null |
+		awk '$1 == "policy" { print $2 }')"
 	[ -n "$policy" ] || policy="?"
-	med="$(perl "$DRIVER" shell "$LARGE_REPO" "$probe" "$ITERATIONS" | awk '{ print $1 }')"
+	med="$(perl "$DRIVER" shell "$LARGE_REPO" "$probe" "$ITERATIONS" </dev/null | awk '{ print $1 }')"
 	verdict="$(awk -v m="$med" -v f="$FLOOR" -v p="$policy" 'BEGIN {
 		if (p != "SERVE") { print "not served" }
 		else if (m < f)   { print "SERVED BELOW FLOOR" }

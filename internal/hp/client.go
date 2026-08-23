@@ -33,6 +33,10 @@ type LookupReq struct {
 	Reason  string `json:"reason"`
 	// Serve is false for the baseline arm: record everything, serve nothing.
 	Serve bool `json:"serve"`
+	// RepoRoot lets the daemon run git against the caller's worktree for
+	// Tier-1 scoping. Worktrees share one object store, so any of them can
+	// resolve any recorded tree.
+	RepoRoot string `json:"repo_root"`
 }
 
 type LookupResp struct {
@@ -42,6 +46,10 @@ type LookupResp struct {
 	StderrBlob  string `json:"stderr_blob"`
 	SourceAgent string `json:"source_agent"`
 	DurationMS  int64  `json:"duration_ms"`
+	// Tier is 0 for an exact tree match, 1 for a diff-disjoint promotion.
+	Tier int `json:"tier"`
+	// ScopeReason explains a Tier-1 promotion in human terms.
+	ScopeReason string `json:"scope_reason,omitempty"`
 	// WaitedMS is time spent blocked on a peer's in-flight execution. Nonzero
 	// means single-flight saved a duplicate run.
 	WaitedMS int64 `json:"waited_ms"`
