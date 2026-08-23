@@ -397,7 +397,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
   var LOOP_PAUSE_MS = 4000;
   var STATS_SNAP_MS = 1000;        // see onStats
 
-  var speedIdx = 2, paused = false, fixtureMode = false;
+  var speedIdx = 2, paused = false;
 
   var $ = function (id) { return document.getElementById(id); };
   var el = {
@@ -619,7 +619,10 @@ button:hover{color:var(--fg);border-color:var(--dim)}
       if (ms >= BIG_HIT_MS) flashDelta(ms);
     } else if (d === 'MISS') {
       state.executed++; state.executedMs += ms; a.exec++;
-    } else {
+    } else if (d === 'PASSTHROUGH') {
+      // PASSTHROUGH work still executed. Keep its reason visible without
+      // removing its duration from either execution clock.
+      state.executed++; state.executedMs += ms; a.exec++;
       state.passthrough++; a.pass++;
     }
 
@@ -644,16 +647,13 @@ button:hover{color:var(--fg);border-color:var(--dim)}
   // second, which means we genuinely missed decisions rather than rounded.
   function onStats(s) {
     state.sawStats = true;
-    // The saved fixture predates the daemon's current PASSTHROUGH accounting,
-    // so its decision records are the source of truth for execution totals.
-    // A live viewer still needs snapshots to catch up after connecting late.
-    if (!fixtureMode && isFinite(s.served)) state.served = Math.max(state.served, s.served);
-    if (!fixtureMode && isFinite(s.executed)) state.executed = Math.max(state.executed, s.executed);
-    if (!fixtureMode && isFinite(s.seconds_deleted)) {
+    if (isFinite(s.served)) state.served = Math.max(state.served, s.served);
+    if (isFinite(s.executed)) state.executed = Math.max(state.executed, s.executed);
+    if (isFinite(s.seconds_deleted)) {
       var claimed = s.seconds_deleted * 1000;
       if (claimed > state.deletedMs + STATS_SNAP_MS) state.deletedMs = claimed;
     }
-    if (!fixtureMode && isFinite(s.seconds_spent)) {
+    if (isFinite(s.seconds_spent)) {
       var spent = s.seconds_spent * 1000;
       if (spent > state.executedMs + STATS_SNAP_MS) state.executedMs = spent;
     }
@@ -690,7 +690,6 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 
   function connect(url) {
     teardown();
-    fixtureMode = false;
     resetAll();
     url = (url || DEFAULT_DAEMON).replace(/\/+$/, '');
     setStatus('', 'connecting to ' + url);
@@ -751,7 +750,6 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 
   function startFixture(why) {
     teardown();
-    fixtureMode = true;
     setStatus('fixture', 'replaying fixture' + (why ? ' \u00b7 ' + why : ''));
     loadFixture().then(function (text) {
       var events = parseFixture(text);

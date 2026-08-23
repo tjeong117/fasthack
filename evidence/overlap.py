@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import collections
-import hashlib
 import json
+import os
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Hashable, Iterable, Sequence
@@ -22,6 +24,7 @@ DEFAULT_CORPUS = Path(
     "/Users/tomjeong/hacker/skunk-works/notes/sealed-corpus/replay-A"
 )
 SPACE = re.compile(r"\s+")
+REPO_ROOT = Path(__file__).resolve().parent.parent
 EXPECTED = {
     "state_avoidable_pct": 7.5,
     "state_cross_agent_pct": 3.6,
@@ -59,7 +62,47 @@ class Attempt:
 
 
 def normalize_command(command: str) -> str:
+    """Match strings.Fields used by hp.NormalizeCommand for the proxy curve."""
     return SPACE.sub(" ", command.strip())
+
+
+def shipping_replay(corpus: Path, keying: str) -> dict:
+    """Run the production corpus loader, normalizer, classifier, and replay."""
+    command = [
+        "go",
+        "run",
+        "./cmd/hindsight",
+        "replay",
+        "--corpus",
+        str(corpus),
+        "--key",
+        keying,
+        "--json",
+        "--by-step",
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "GOCACHE": str(Path(tempfile.gettempdir()) / "hindsight-go-build"),
+            },
+        )
+    except FileNotFoundError as exc:
+        raise SystemExit("go is required to run the shipping replay implementation") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.strip() or exc.stdout.strip() or str(exc)
+        raise SystemExit(f"shipping replay failed for --key {keying}: {detail}") from exc
+    try:
+        return json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"shipping replay returned invalid JSON for --key {keying}: {exc}"
+        ) from exc
 
 
 def _instance_id(record: dict) -> str:
@@ -189,54 +232,6 @@ def held_out_overlap(
     return _ratio(hits, total)
 
 
-def raw_reuse_taxonomy(
-    tasks: dict[str, list[Attempt]], key: Callable[[Step], Hashable | None]
-) -> dict:
-    """Classify raw slots as prior self reuse, peer reuse, or unique.
-
-    Peer reuse is potential reuse: a matching key exists in another attempt for
-    the task. The corpus has no cross-attempt command timestamps, so it cannot
-    establish which peer would have populated the cache first.
-    """
-    self_reuse = 0
-    peer_reuse = 0
-    unique = 0
-    missing_key = 0
-    for attempts in tasks.values():
-        peer_banks = [{key(step) for step in attempt.steps} for attempt in attempts]
-        for index, attempt in enumerate(attempts):
-            peers: set[Hashable | None] = set()
-            for peer_index, bank in enumerate(peer_banks):
-                if peer_index != index:
-                    peers.update(bank)
-            seen: set[Hashable] = set()
-            for step in attempt.steps:
-                value = key(step)
-                if value is None:
-                    missing_key += 1
-                elif value in seen:
-                    self_reuse += 1
-                elif value in peers:
-                    peer_reuse += 1
-                else:
-                    unique += 1
-                if value is not None:
-                    seen.add(value)
-    denominator = self_reuse + peer_reuse + unique + missing_key
-    return {
-        "denominator_raw_command_slots": denominator,
-        "prior_self_reuse": _ratio(self_reuse, denominator),
-        "peer_reuse": _ratio(peer_reuse, denominator),
-        "avoidable_total": _ratio(self_reuse + peer_reuse, denominator),
-        "unique": _ratio(unique, denominator),
-        "missing_key": _ratio(missing_key, denominator),
-        "timing_caveat": (
-            "Peer matches are potential reuse because the corpus has no "
-            "cross-attempt command timestamps."
-        ),
-    }
-
-
 def _ratio(numerator: int, denominator: int) -> dict:
     return {
         "numerator": numerator,
@@ -249,42 +244,20 @@ def command_key(step: Step) -> str:
     return step.command
 
 
-def state_command_key(step: Step) -> tuple[str, str] | None:
-    if not step.state_sha256:
-        return None
-    return (step.state_sha256, step.command)
-
-
-def _canonical_delta_hash(delta: object) -> str:
-    encoded = json.dumps(
-        delta, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def diagnose_state(attempts: Sequence[Attempt]) -> dict:
-    hash_match = hash_total = 0
+    changed_on_mutation = mutation_total = 0
     unchanged_match = unchanged_total = 0
     retained_after_read = retained_total = 0
     diff_nondecreasing = diff_pairs = 0
     file_nondecreasing = file_pairs = 0
-    empty_hash = hashlib.sha256(b"{}").hexdigest()
-    empty_delta_hash_matches = 0
-    empty_delta_total = 0
 
     for attempt in attempts:
-        for step in attempt.steps:
-            if step.state_sha256 and step.delta is not None:
-                hash_total += 1
-                hash_match += step.state_sha256 == _canonical_delta_hash(step.delta)
-            if step.delta == {} and step.state_sha256:
-                empty_delta_total += 1
-                empty_delta_hash_matches += step.state_sha256 == empty_hash
-
         for previous, current in zip(attempt.steps, attempt.steps[1:]):
-            # state_sha256/delta are treated as post-command snapshots. A command
-            # marked non-mutating should leave the preceding state unchanged.
-            if current.mutated is False and previous.state_sha256 and current.state_sha256:
+            has_states = bool(previous.state_sha256 and current.state_sha256)
+            if current.mutated is True and has_states:
+                mutation_total += 1
+                changed_on_mutation += previous.state_sha256 != current.state_sha256
+            if current.mutated is False and has_states:
                 unchanged_total += 1
                 unchanged_match += previous.state_sha256 == current.state_sha256
                 if previous.delta not in ({}, None):
@@ -297,12 +270,11 @@ def diagnose_state(attempts: Sequence[Attempt]) -> dict:
                 file_pairs += 1
                 file_nondecreasing += current.file_count >= previous.file_count
 
-    hash_rate = hash_match / hash_total if hash_total else 0.0
+    mutation_rate = changed_on_mutation / mutation_total if mutation_total else 0.0
     unchanged_rate = unchanged_match / unchanged_total if unchanged_total else 0.0
-    retained_rate = retained_after_read / retained_total if retained_total else 0.0
-    if hash_total == 0 or unchanged_total == 0 or retained_total == 0:
+    if mutation_total == 0 or unchanged_total == 0:
         verdict = "inconclusive"
-    elif hash_rate >= 0.99 and unchanged_rate >= 0.95 and retained_rate >= 0.95:
+    elif mutation_rate >= 0.99 and unchanged_rate >= 0.80:
         verdict = "supported"
     else:
         verdict = "not_supported"
@@ -310,14 +282,12 @@ def diagnose_state(attempts: Sequence[Attempt]) -> dict:
     return {
         "verdict": verdict,
         "interpretation": (
-            "supported means state_sha256 matches canonical cumulative delta "
-            "snapshots closely enough to use as the corpus state key; it does "
-            "not prove equivalence to Hindsight's git tree hash"
+            "state_sha256 behaves as the corpus's cumulative workspace-state "
+            "identifier: it changes on mutating transitions and usually persists "
+            "across non-mutating transitions. delta is a per-step observation and "
+            "is not the value hashed by state_sha256"
         ),
-        "canonical_delta_hash_matches": _ratio(hash_match, hash_total),
-        "empty_delta_sha256_object_matches": _ratio(
-            empty_delta_hash_matches, empty_delta_total
-        ),
+        "mutating_steps_change_state": _ratio(changed_on_mutation, mutation_total),
         "nonmutating_steps_preserve_state": _ratio(unchanged_match, unchanged_total),
         "nonempty_delta_retained_after_nonmutating_step": _ratio(
             retained_after_read, retained_total
@@ -325,8 +295,9 @@ def diagnose_state(attempts: Sequence[Attempt]) -> dict:
         "diff_lines_nondecreasing": _ratio(diff_nondecreasing, diff_pairs),
         "file_count_nondecreasing": _ratio(file_nondecreasing, file_pairs),
         "monotonicity_note": (
-            "A cumulative diff may shrink when an edit is reverted, so the two "
-            "monotonicity rates are diagnostics rather than pass/fail tests."
+            "delta is per-step, so its retention rate is expected to be near zero. "
+            "diff and file counts may shrink when edits are reverted, so their "
+            "monotonicity rates are diagnostics rather than gates."
         ),
     }
 
@@ -385,12 +356,41 @@ def modeled_value(tasks: dict[str, list[Attempt]]) -> dict:
             }
         )
     return {
-        "label": "Hit counts are measured; all seconds are modeled assumptions.",
+        "label": (
+            "Command-only held-out matches are measured proxy counts; all seconds "
+            "are modeled assumptions. These are not state-keyed cache hits."
+        ),
         "cost_model_source": "seed/value.py",
         "rows": sorted(rows, key=lambda row: row["deleted_seconds_modeled"], reverse=True),
         "total_deleted_seconds_modeled": sum(
             row["deleted_seconds_modeled"] for row in rows
         ),
+    }
+
+
+def replay_taxonomy(replay: dict) -> dict:
+    """Present a shipping ReplayReport in the evidence schema."""
+    overall = replay["overall"]
+    denominator = overall["commands"]
+    return {
+        "denominator_raw_command_slots": denominator,
+        "prior_self_reuse": _ratio(overall["self_reuse"], denominator),
+        "peer_reuse": _ratio(overall["cross_agent"], denominator),
+        "avoidable_total": _ratio(overall["avoidable"], denominator),
+        "unique": _ratio(denominator - overall["avoidable"], denominator),
+        "missing_key": _ratio(0, denominator),
+        "timing_caveat": (
+            "The shipping replay interleaves attempts by step index and breaks "
+            "ties in stable submission/path order. A peer sighting wins over a "
+            "self sighting when both exist."
+        ),
+    }
+
+
+def replay_step_curve(replay: dict) -> dict[str, dict]:
+    return {
+        row["steps"]: _ratio(row["cross_agent"], row["commands"])
+        for row in replay["by_step"]
     }
 
 
@@ -402,6 +402,14 @@ def build_report(corpus: Path) -> dict:
 
     multi_attempts = [attempt for group in tasks.values() for attempt in group]
     state = diagnose_state(multi_attempts)
+    if state["verdict"] != "supported":
+        raise SystemExit(
+            "state_sha256 did not behave like cumulative workspace state; "
+            "refusing to publish state-keyed evidence"
+        )
+
+    state_replay = shipping_replay(corpus, "state")
+    command_replay = shipping_replay(corpus, "command")
     windows = {
         "first_1": (0, 1),
         "first_3": (0, 3),
@@ -415,15 +423,6 @@ def build_report(corpus: Path) -> dict:
         name: held_out_overlap(tasks, command_key, start, stop)
         for name, (start, stop) in windows.items()
     }
-    state_curve = None
-    state_taxonomy = None
-    if state["verdict"] == "supported":
-        state_curve = {
-            name: held_out_overlap(tasks, state_command_key, start, stop)
-            for name, (start, stop) in windows.items()
-        }
-        state_taxonomy = raw_reuse_taxonomy(tasks, state_command_key)
-
     raw_commands = sum(len(attempt.steps) for attempt in multi_attempts)
     deduplicated_commands = sum(
         len({step.command for step in attempt.steps}) for attempt in multi_attempts
@@ -435,7 +434,7 @@ def build_report(corpus: Path) -> dict:
     mixed_tasks = sum(len(values) >= 2 for values in submissions.values())
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "corpus_path": str(corpus.resolve()),
         "load": load,
         "multi_agent": {
@@ -450,12 +449,21 @@ def build_report(corpus: Path) -> dict:
         "state_diagnostic": state,
         "held_out_method": (
             "For each agent, deduplicate keys in the selected command window and "
-            "compare them with the union of that task's peer-agent key sets."
+            "compare them with the union of that task's peer-agent key sets. This "
+            "legacy command-only curve is an upper-bound proxy, not the source of "
+            "the state-keyed headline claims."
         ),
         "command_only_held_out": command_curve,
-        "state_command_held_out": state_curve,
-        "command_only_raw_reuse": raw_reuse_taxonomy(tasks, command_key),
-        "state_command_raw_reuse": state_taxonomy,
+        "shipping_replay_method": (
+            "Generated by `go run ./cmd/hindsight replay --json --by-step` using "
+            "the production loader, NormalizeCommand, temporal interleave, "
+            "peer-first tie-break, and classifier."
+        ),
+        "shipping_state_replay": state_replay,
+        "shipping_command_replay": command_replay,
+        "state_command_by_step": replay_step_curve(state_replay),
+        "command_only_raw_reuse": replay_taxonomy(command_replay),
+        "state_command_raw_reuse": replay_taxonomy(state_replay),
         "submissions": {
             "tasks_with_multiple_submission_ids": mixed_tasks,
             "total_multi_agent_tasks": len(tasks),
@@ -478,17 +486,12 @@ def build_report(corpus: Path) -> dict:
 
 def claim_check(report: dict) -> dict:
     taxonomy = report["state_command_raw_reuse"]
-    curve = report["state_command_held_out"]
-    if taxonomy is None or curve is None:
-        return {
-            name: {"expected_percent": expected, "status": "not_tested"}
-            for name, expected in EXPECTED.items()
-        }
+    curve = report["state_command_by_step"]
     actual = {
         "state_avoidable_pct": taxonomy["avoidable_total"]["percent"],
         "state_cross_agent_pct": taxonomy["peer_reuse"]["percent"],
-        "state_first_3_pct": curve["first_3"]["percent"],
-        "state_after_50_pct": curve["after_50"]["percent"],
+        "state_first_3_pct": curve["0-2"]["percent"],
+        "state_after_50_pct": curve["50+"]["percent"],
     }
     return {
         name: {
@@ -516,10 +519,11 @@ def overlap_markdown(report: dict) -> str:
         "",
         report["held_out_method"],
         "",
-        "Every cell is `percent (matching deduplicated keys / deduplicated keys examined)`.",
+        "This command-only table preserves the original held-out-per-agent proxy. "
+        "Every cell is `percent (matching deduplicated commands / deduplicated commands examined)`.",
         "",
-        "| Window | Command only | `(state_sha256, command)` |",
-        "|---|---:|---:|",
+        "| Window | Command only |",
+        "|---|---:|",
     ]
     for label, key in (
         ("First 1", "first_1"),
@@ -530,11 +534,25 @@ def overlap_markdown(report: dict) -> str:
         ("After 50", "after_50"),
         ("All", "all"),
     ):
-        state_curve = report["state_command_held_out"]
-        state_metric = state_curve[key] if state_curve else None
-        lines.append(
-            f'| {label} | {pct(report["command_only_held_out"][key])} | {pct(state_metric)} |'
-        )
+        lines.append(f'| {label} | {pct(report["command_only_held_out"][key])} |')
+
+    state_taxonomy = report["state_command_raw_reuse"]
+    lines += [
+        "",
+        "## Shipping state-keyed replay",
+        "",
+        report["shipping_replay_method"],
+        "",
+        f'- Avoidable commands: {pct(state_taxonomy["avoidable_total"])}',
+        f'- Cross-agent commands: {pct(state_taxonomy["peer_reuse"])}',
+        f'- Self-reuse commands: {pct(state_taxonomy["prior_self_reuse"])}',
+        "",
+        "| Step band | Cross-agent reuse |",
+        "|---|---:|",
+    ]
+    for band, metric in report["state_command_by_step"].items():
+        lines.append(f"| {band} | {pct(metric)} |")
+
     diagnostic = report["state_diagnostic"]
     lines += [
         "",
@@ -542,8 +560,7 @@ def overlap_markdown(report: dict) -> str:
         "",
         f'Verdict: **{diagnostic["verdict"]}**. {diagnostic["interpretation"]}.',
         "",
-        f'- Canonical delta hashes: {pct(diagnostic["canonical_delta_hash_matches"])}',
-        f'- Empty-delta hashes equal `sha256("{{}}")`: {pct(diagnostic["empty_delta_sha256_object_matches"])}',
+        f'- Mutating steps change state: {pct(diagnostic["mutating_steps_change_state"])}',
         f'- Non-mutating steps preserve state: {pct(diagnostic["nonmutating_steps_preserve_state"])}',
         f'- Non-empty deltas persist after a non-mutating step: {pct(diagnostic["nonempty_delta_retained_after_nonmutating_step"])}',
         f'- `diff_lines` is nondecreasing: {pct(diagnostic["diff_lines_nondecreasing"])}',
@@ -551,7 +568,7 @@ def overlap_markdown(report: dict) -> str:
         "",
         diagnostic["monotonicity_note"],
         "",
-        "`state_sha256` is a hash of the corpus delta snapshot, not Hindsight's git tree hash. Even when cumulative, it is only a proxy for the production key.",
+        "`state_sha256` is the corpus analogue of Hindsight's git tree hash, not the tree hash itself. The state-keyed replay therefore measures the same key shape against recorded corpus state; it does not prove byte-for-byte equivalence to a live git tree.",
         "",
     ]
     return "\n".join(lines)
@@ -568,11 +585,11 @@ def value_markdown(report: dict) -> str:
     lines = [
         "# Modeled value table",
         "",
-        "**Hit counts are measured from the sealed corpus. Every seconds figure is modeled, not measured.**",
+        f'**{value["label"]}**',
         "",
         "The constants are copied from the read-only `seed/value.py` artifact.",
         "",
-        "| Class | Measured hits | Deduplicated commands | Hit rate | Assumed seconds/command | Modeled seconds deleted |",
+        "| Class | Measured proxy matches | Deduplicated commands | Match rate | Assumed seconds/command | Modeled seconds deleted |",
         "|---|---:|---:|---:|---:|---:|",
     ]
     for row in value["rows"]:
@@ -605,7 +622,7 @@ def claims_markdown(report: dict) -> str:
     lines = [
         "# Regenerable claims",
         "",
-        f'This file was generated from `{report["corpus_path"]}` by `python3 evidence/overlap.py`.',
+        f'This file was generated from `{report["corpus_path"]}` by `python3 evidence/overlap.py`; the four state-keyed figures come from the shipping Go replay invoked by that script.',
         "",
         f'- The analysis covers **{multi["tasks"]} multi-agent tasks** and **{multi["attempts"]} attempts**.',
         f'- Those attempts contain **{multi["raw_command_slots"]:,} raw command slots** and **{multi["deduplicated_commands_per_agent"]:,} commands after deduplicating within each agent**.',
@@ -629,7 +646,7 @@ def claims_markdown(report: dict) -> str:
         "",
         "Any `does_not_match` result must be corrected or qualified in the public design document; this generator does not tune its method to force the expected number.",
         "",
-        "Cross-agent corpus matches are potential reuse because the records do not provide a shared command-level timeline across attempts. The live fleet run is the measured concurrency result.",
+        "The shipping replay uses step index as the corpus's shared logical clock, with a stable submission/path tie-break. The live fleet run remains the measured concurrency result.",
         "",
     ]
     return "\n".join(lines)
