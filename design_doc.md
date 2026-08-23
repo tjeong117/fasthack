@@ -170,6 +170,48 @@ Shadow verification runs agent-side, because the daemon has no worktree and a re
 
 Verified against a deliberately poisoned blob: detected, reported as `CACHE_MISMATCH`, evicted, nonzero exit.
 
+## Measured
+
+Five agents, five worktrees, launched simultaneously on one repo, running an identical seven-command sequence. Both arms run the hook and record identically; the only variable is whether hits are served.
+
+| | baseline | cached |
+|---|---|---|
+| commands demanded | 35 | 35 |
+| executed | 35 | 6 |
+| served | 0 | 29 (24 coalesced in flight) |
+| execution-seconds | 34.1s | 3.0s |
+| hit rate | 0% | 82.9% |
+
+Two caveats, both of which make the headline number *conservative* rather than flattering:
+
+The cached arm's internal counterfactual is 26.7s, against a measured baseline of 34.1s. The gap is CPU contention: the baseline runs five expensive commands concurrently and each one is slowed by the others, while the cached arm executes one at a time and therefore records an uncontended duration. Pricing avoided work at uncontended speed understates what was actually avoided, so the counterfactual is a lower bound.
+
+On a lighter workload where contention is negligible, the two reconcile closely: 25.0s counterfactual against a 25.3s measured baseline, a 1.2% gap. That agreement between two independent measurements is the number worth trusting.
+
+### What shadow verification found
+
+On the first real fleet run, verification flagged `ls -la` as divergent. That was not a harness artifact. Long listings print mtimes, sizes and ownership, and git's tree hash deliberately covers none of them, so two worktrees with byte-identical trees legitimately produce different output. The key did not dominate the output, which is a principle 2 violation.
+
+It is worth being precise about why nothing else would have caught it. The command mutates nothing, so the purity gate sees identical state before and after and is satisfied. It is not non-deterministic in the `date` or `$RANDOM` sense, so nothing about it looks suspicious. Only re-executing it and comparing surfaced the problem. `ls -l`, `stat`, `du` and `df` are now passthrough; plain `ls` prints names only and remains serveable.
+
+This is the argument for keeping verification in the product rather than treating it as a test: the deny-list will always be incomplete, and this is the mechanism that tells you where.
+
+## Roadmap: other tool classes
+
+The hook mechanism generalizes, but the interesting constraint is not "which tools" — it is **what state determines the output**. Shell commands are keyed on workspace state. Everything else answers that question differently.
+
+**Code edits: deliberately refused.** Caching `apply_patch` or `Edit` would violate principle 3 head-on. An edit is a decision, not an observation — model output, not an environment response — and letting agent two inherit agent one's patch collapses five independent searches into one, destroying the reason to fan out at all. It also has nothing to capture: edits cost milliseconds, and the value is concentrated in slow things.
+
+We get the useful half for free anyway. Because the key is state-based rather than history-based, an unobserved edit simply appears in the next tree hash; that is why the Bash-only matcher is sufficient even though Codex routes edits through `apply_patch`. And if two agents independently converge on an identical tree, they immediately share every downstream cache entry — the consequences of an edit are shared once two agents have agreed on it, without the patch itself ever being copied.
+
+**Read-only MCP tools: the most promising extension.** Schema listings, doc searches, SELECT queries and issue fetches are slow, network-bound and heavily repeated across a fleet. Since value tracks latency, this is plausibly the second-largest pool after test suites.
+
+The obstacle is that the determining state is remote. `list_tables` depends on a database schema the tree hash knows nothing about, so principle 2 fails by default. An MCP read is a verified replay only when the server exposes a version token — schema hash, ETag, snapshot id — that can enter the key. Where none exists, the honest fallback is session-scoped memoization: key on `(server, tool, args)` with no state component and label the guarantee as "identical within this run" rather than claiming verified replay. Weaker, clearly stated, still turns five agents' doc searches into one.
+
+**Mutating MCP tools: passthrough forever.** Migrations, deploys, Slack posts. Note that `execute_sql` cannot be classified from the tool name at all; distinguishing a SELECT requires parsing the statement. Same shape as `sed -n` versus `sed -i`, same answer: parse conservatively, default to passthrough.
+
+Concretely, the refactor this implies is small: `Classify(cmd string) (Policy, string)` becomes `Classify(tool string, input) (Policy, KeyScope, string)`, where the scope names which state must enter the key — workspace, session, or unservable.
+
 ## Dependency scoping — designed, not built
 
 Whole-tree keying is coarse. If agent one edits `src/auth.py`, agent two's `pytest tests/test_billing.py` misses even though nothing it reads changed.

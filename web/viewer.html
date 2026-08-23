@@ -393,6 +393,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
   var SPEEDS = [1, 10, 25, 60];
   var BIG_HIT_MS = 5000;           // worth drawing the eye to
   var LOOP_PAUSE_MS = 4000;
+  var STATS_SNAP_MS = 1000;        // see onStats
 
   var speedIdx = 2, paused = false;
 
@@ -583,17 +584,23 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     render();
   }
 
-  // The daemon's stats event is authoritative for the counts, which also lets
-  // a viewer that connects mid-run catch up. seconds_deleted only ever moves
-  // up: a counter that ticks backwards reads as a bug even when it is not.
+  // The daemon's stats event lets a viewer that connects mid-run catch up, and
+  // nothing here ever moves a counter backwards: a counter that ticks down
+  // reads as a bug even when it is not.
+  //
+  // seconds_deleted is quantised to 0.1s, so snapping to it unconditionally
+  // would ratchet the total upward by up to 50ms per stats event. Only trust it
+  // over the locally accumulated exact sum when it is ahead by more than a
+  // second, which means we genuinely missed decisions rather than rounded.
   function onStats(s) {
     state.sawStats = true;
-    if (isFinite(s.served)) state.served = s.served;
-    if (isFinite(s.executed)) state.executed = s.executed;
+    if (isFinite(s.served)) state.served = Math.max(state.served, s.served);
+    if (isFinite(s.executed)) state.executed = Math.max(state.executed, s.executed);
     if (isFinite(s.seconds_deleted)) {
-      state.deletedMs = Math.max(state.deletedMs, s.seconds_deleted * 1000);
+      var claimed = s.seconds_deleted * 1000;
+      if (claimed > state.deletedMs + STATS_SNAP_MS) state.deletedMs = claimed;
     }
-    if (isFinite(s.verified)) state.verified = s.verified;
+    if (isFinite(s.verified)) state.verified = Math.max(state.verified, s.verified);
     if (isFinite(s.divergent)) state.divergent = Math.max(state.divergent, s.divergent);
     if (isFinite(s.inflight)) state.inflight = s.inflight;
     if (isFinite(s.agents)) { for (var i = 1; i <= s.agents; i++) agentSlot('a' + i); }

@@ -121,7 +121,10 @@ var classifyCases = []classifyCase{
 	{"grep -rn 'foo' src/", SERVE, "read: grep"},
 	{"rg TODO", SERVE, "read: rg"},
 	{"cat README.md", SERVE, "read: cat"},
-	{"ls -la", SERVE, "read: ls"},
+	{"ls", SERVE, "read: ls"},
+	// A long listing prints mtimes; identical trees diverge. See
+	// TestFileMetadataIsNeverServed.
+	{"ls -la", PASSTHROUGH, "long format"},
 	{"find . -name '*.go'", SERVE, "read: find"},
 	{"head -n 20 main.go", SERVE, "read: head"},
 	{"tail -n 5 log.txt", SERVE, "read: tail"},
@@ -131,7 +134,10 @@ var classifyCases = []classifyCase{
 	{"cut -d, -f1 data.csv", SERVE, "read: cut"},
 	{"awk '{print $1}' data.txt", SERVE, "read: awk"},
 	{"diff a.txt b.txt", SERVE, "read: diff"},
-	{"stat main.go", SERVE, "read: stat"},
+	// stat prints mtimes, sizes and inodes, none of which git's tree hash
+	// covers, so identical trees can produce different output. See
+	// TestFileMetadataIsNeverServed.
+	{"stat main.go", PASSTHROUGH, "prints file metadata"},
 	{"file main.go", SERVE, "read: file"},
 	{"tree -L 2", SERVE, "read: tree"},
 	{"basename /a/b.txt", SERVE, "read: basename"},

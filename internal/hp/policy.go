@@ -55,9 +55,34 @@ var mutationHeads = map[string]bool{
 var readHeads = map[string]bool{
 	"grep": true, "rg": true, "cat": true, "ls": true, "find": true,
 	"head": true, "tail": true, "wc": true, "sort": true, "uniq": true, "cut": true,
-	"awk": true, "diff": true, "stat": true, "file": true, "tree": true,
+	"awk": true, "diff": true, "file": true, "tree": true,
 	"basename": true, "dirname": true, "realpath": true, "nl": true,
 	"md5sum": true, "shasum": true, "echo": true, "pwd": true, "which": true,
+}
+
+// metadataHeads print file metadata — mtimes, sizes, inodes, ownership — that
+// git's tree hash deliberately does not cover. Two worktrees with byte-identical
+// trees legitimately produce different output here, so the key cannot dominate
+// the output and these must never be served.
+//
+// Found by shadow verification on the first real fleet run: `ls -la` was being
+// served and diverged. Plain `ls` prints names only and stays serveable.
+var metadataHeads = map[string]bool{
+	"stat": true, "du": true, "df": true,
+}
+
+// longListing reports whether an ls invocation will print timestamps.
+func longListing(toks []shellToken) bool {
+	for _, t := range toks {
+		a := t.text
+		if !strings.HasPrefix(a, "-") || strings.HasPrefix(a, "--") {
+			continue
+		}
+		if strings.ContainsAny(a[1:], "lgn") {
+			return true
+		}
+	}
+	return false
 }
 
 // buildHeads are test, build and lint commands. Several of them write to the
@@ -189,6 +214,12 @@ func classifyHead(head string, toks []shellToken) (Policy, string) {
 	}
 	if mutationHeads[head] {
 		return RECORD_ONLY, "mutation: " + head
+	}
+	if metadataHeads[head] {
+		return PASSTHROUGH, "prints file metadata the tree hash does not cover: " + head
+	}
+	if head == "ls" && longListing(toks[1:]) {
+		return PASSTHROUGH, "ls long format prints mtimes the tree hash does not cover"
 	}
 	if readHeads[head] {
 		return SERVE, "read: " + head

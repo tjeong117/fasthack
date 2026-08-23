@@ -661,9 +661,16 @@ for r in windowed:
         slot["exec"] += 1
         slot["exec_ms"] += dur
     elif dec == "LEASE_WAIT":
+        # A lease wait avoided an execution exactly as a hit did: the agent
+        # blocked on a peer instead of duplicating the work, and never ran the
+        # command. Counting it only as "waiting" understates what was deleted
+        # and stops the arithmetic from reconciling against the baseline arm.
+        served += 1
+        served_ms += dur
         waits += 1
         wait_ms += dur
         slot["wait"] += 1
+        slot["deleted_ms"] += dur
 
 demand = served + executed
 hit_rate = (100.0 * served / demand) if demand else 0.0
@@ -678,8 +685,8 @@ if malformed:
 w("")
 w("  %-38s %11d" % ("commands agents asked for", demand))
 w("  %-38s %11d" % ("  executed  (MISS + PASSTHROUGH)", executed))
-w("  %-38s %11d" % ("  served    (HIT)", served))
-w("  %-38s %11d" % ("  lease waits (LEASE_WAIT)", waits))
+w("  %-38s %11d" % ("  served    (HIT + LEASE_WAIT)", served))
+w("  %-38s %11d" % ("    of which coalesced in flight", waits))
 w("")
 w("  %-38s %10.1fs" % ("execution-seconds spent", executed_ms / 1000.0))
 w("  %-38s %10.1fs" % ("execution-seconds DELETED", served_ms / 1000.0))
