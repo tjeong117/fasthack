@@ -48,6 +48,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/lookup", s.handleLookup)
 	mux.HandleFunc("/record", s.handleRecord)
 	mux.HandleFunc("/release", s.handleRelease)
+	mux.HandleFunc("/servable", s.handleServable)
+	mux.HandleFunc("/verify", s.handleVerify)
 	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/stats", s.handleStats)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "ok") })
@@ -200,6 +202,53 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
+func (s *Server) handleServable(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.store.ServableRecords())
+}
+
+// VerifyVerdict is the result of re-executing a served command for real and
+// diffing it against what was served.
+type VerifyVerdict struct {
+	Key      string `json:"key"`
+	OK       bool   `json:"ok"`
+	Detail   string `json:"detail"`
+	RawMatch bool   `json:"raw_match"`
+}
+
+// handleVerify records a verdict and evicts on divergence.
+//
+// Divergence must be loud. A cache that quietly serves a wrong answer is worse
+// than no cache, so the counter is the credibility of the whole system and it
+// is never allowed to be silently green.
+func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
+	var v VerifyVerdict
+	if err := json.NewDecoder(r.Body).Decode(&v); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	src, found := s.store.Lookup(v.Key)
+	rec := &Record{
+		V: 1, TS: float64(time.Now().UnixMilli()) / 1000,
+		Agent: "verifier", Key: v.Key, Decision: "VERIFY",
+		Reason: v.Detail, Verified: &v.OK,
+	}
+	if found {
+		rec.Cmd, rec.CmdNorm, rec.CwdRel = src.Cmd, src.CmdNorm, src.CwdRel
+		rec.Policy, rec.SourceAgent = src.Policy, src.Agent
+	}
+	if !v.OK {
+		s.store.Evict(v.Key)
+		log.Printf("hindsight: CACHE_MISMATCH key=%s %s", v.Key, v.Detail)
+	}
+	if err := s.store.Append(rec); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.broadcast(map[string]any{"type": "verify", "key": v.Key, "ok": v.OK, "detail": v.Detail})
+	s.broadcastStats()
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
 // emitDecision logs and broadcasts decisions the daemon makes on its own
 // (hits and lease waits). Executions are logged by `hindsight record`.
 func (s *Server) emitDecision(req *LookupReq, decision string, src *Record, waited int64) {
@@ -252,16 +301,15 @@ func (s *Server) stats() Stats {
 		case DecisionHit, DecisionLeaseWait:
 			st.Served++
 			st.SecondsDeleted += float64(r.DurationMS) / 1000
-			if r.Verified != nil {
-				if *r.Verified {
-					st.Verified++
-				} else {
-					st.Divergent++
-				}
-			}
 		case DecisionMiss:
 			st.Executed++
 			st.SecondsSpent += float64(r.DurationMS) / 1000
+		case "VERIFY":
+			if r.Verified != nil && *r.Verified {
+				st.Verified++
+			} else {
+				st.Divergent++
+			}
 		}
 	}
 	st.Agents = len(agents)

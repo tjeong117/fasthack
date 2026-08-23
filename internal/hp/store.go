@@ -209,6 +209,18 @@ func (s *Store) PutBlob(b []byte) (string, error) {
 
 func (s *Store) GetBlob(id string) ([]byte, error) { return os.ReadFile(s.BlobPath(id)) }
 
+// ServableRecords snapshots what the cache is currently willing to serve.
+// Shadow verification works through this list.
+func (s *Store) ServableRecords() []*Record {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*Record, 0, len(s.servable))
+	for _, r := range s.servable {
+		out = append(out, r)
+	}
+	return out
+}
+
 // Records returns a snapshot for stats and verification passes.
 func (s *Store) Records() []*Record {
 	s.mu.RLock()

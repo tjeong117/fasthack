@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hindsight</title>
+<style>
+/* Instrument, not dashboard. Dark, high contrast, one accent for hits and one
+   warning colour for divergence. Everything sized to read from the back of a
+   room: the deleted-seconds counter is the only thing that should be legible
+   from thirty feet, and everything else earns its place by supporting it. */
+:root{
+  --bg:#06080b;
+  --panel:#0b0f15;
+  --panel-2:#0f141c;
+  --line:#18202c;
+  --line-2:#222c3c;
+  --fg:#e9eff6;
+  --dim:#7a889b;
+  --dimmer:#4a5567;
+  --accent:#2fe08a;
+  --accent-ink:#04150c;
+  --accent-soft:rgba(47,224,138,.12);
+  --warn:#ff4438;
+  --warn-ink:#1a0402;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--fg);
+  font-family:var(--mono);font-size:15px;line-height:1.4;
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+b{font-weight:600}
+.dim{color:var(--dim)}
+
+/* ---------------------------------------------------------------- header */
+header{
+  display:flex;align-items:center;gap:20px;
+  padding:12px 22px;border-bottom:1px solid var(--line);
+  background:var(--panel);flex:0 0 auto;
+}
+.brand{display:flex;align-items:baseline;gap:14px;white-space:nowrap}
+.brand-name{font-size:17px;font-weight:700;letter-spacing:.22em}
+.brand-sub{font-size:12px;color:var(--dimmer);letter-spacing:.04em}
+.spacer{flex:1}
+.controls{display:flex;align-items:center;gap:10px}
+.controls label{font-size:12px;color:var(--dim);letter-spacing:.06em}
+input[type=text]{
+  font:inherit;font-size:13px;color:var(--fg);background:#05070a;
+  border:1px solid var(--line-2);border-radius:3px;
+  padding:5px 9px;width:210px;outline:none;
+}
+input[type=text]:focus{border-color:var(--accent)}
+button{
+  font:inherit;font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--dim);background:transparent;border:1px solid var(--line-2);
+  border-radius:3px;padding:5px 10px;cursor:pointer;
+}
+button:hover{color:var(--fg);border-color:var(--dim)}
+.status{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--dim);
+  white-space:nowrap;min-width:210px;justify-content:flex-end}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer);flex:0 0 auto}
+.status.live .dot{background:var(--accent);box-shadow:0 0 0 0 var(--accent);animation:ping 2s infinite}
+.status.live{color:var(--accent)}
+.status.fixture .dot{background:transparent;border:1.5px solid var(--dim)}
+@keyframes ping{
+  0%{box-shadow:0 0 0 0 rgba(47,224,138,.5)}
+  70%{box-shadow:0 0 0 7px rgba(47,224,138,0)}
+  100%{box-shadow:0 0 0 0 rgba(47,224,138,0)}
+}
+
+/* ------------------------------------------------------------------ hero */
+.hero{
+  display:flex;align-items:flex-end;gap:clamp(24px,5vw,80px);
+  padding:24px 22px 20px;border-bottom:1px solid var(--line);flex:0 0 auto;
+}
+.counter{position:relative;flex:0 0 auto}
+.counter-value{
+  font-size:clamp(58px,9.4vw,158px);line-height:.84;font-weight:700;
+  letter-spacing:-.035em;color:var(--accent);
+  transition:text-shadow .25s ease;
+}
+.counter-value.pulse{text-shadow:0 0 34px rgba(47,224,138,.55)}
+.counter-value .unit{font-size:.34em;letter-spacing:0;margin-left:.06em;opacity:.75}
+.counter-label{
+  margin-top:12px;font-size:clamp(11px,1.05vw,14px);letter-spacing:.24em;
+  text-transform:uppercase;color:var(--dim);
+}
+.counter-sub{margin-top:7px;font-size:14px;color:var(--dim)}
+.counter-sub b{color:var(--fg)}
+.counter-sub .sep{color:var(--dimmer);margin:0 6px}
+.delta{
+  position:absolute;top:-6px;left:0;font-size:20px;color:var(--accent);
+  opacity:0;pointer-events:none;font-weight:600;
+}
+.delta.go{animation:flyup 1.15s ease-out}
+@keyframes flyup{
+  0%{opacity:0;transform:translateY(6px)}
+  18%{opacity:1}
+  100%{opacity:0;transform:translateY(-30px)}
+}
+
+/* ---------------------------------------------------------------- clocks */
+.clocks{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px}
+.clock-row{display:flex;gap:clamp(20px,4vw,64px)}
+.clock{flex:1;min-width:0}
+.clock-label{
+  font-size:11px;letter-spacing:.17em;text-transform:uppercase;color:var(--dimmer);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.clock-value{font-size:clamp(26px,3.1vw,48px);line-height:1.05;font-weight:600;margin-top:5px}
+.clock.ghost .clock-value{color:var(--dim)}
+.gap-track{
+  display:flex;height:9px;border-radius:2px;overflow:hidden;background:#0a0e14;
+  border:1px solid var(--line);
+}
+.gap-actual{background:#2c3949;transition:width .5s ease}
+.gap-deleted{background:var(--accent);transition:width .5s ease}
+.gap-legend{
+  display:flex;justify-content:space-between;font-size:11px;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--dimmer);margin-top:6px;
+}
+.gap-legend .on{color:var(--accent)}
+
+/* ---------------------------------------------------------------- verify */
+.verify{
+  display:flex;align-items:center;gap:28px;padding:11px 22px;flex:0 0 auto;
+  border-bottom:1px solid var(--line);background:var(--panel-2);
+  font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+}
+.verify b{color:var(--fg);font-size:16px;letter-spacing:0;margin-right:5px}
+.verify .ok b{color:var(--accent)}
+.verify-note{margin-left:auto;text-transform:none;letter-spacing:0;
+  font-size:12px;color:var(--dimmer)}
+.verify.loud{background:var(--warn);color:var(--warn-ink);animation:alarm 1.1s steps(1) infinite}
+.verify.loud b,.verify.loud .ok b,.verify.loud .verify-note{color:var(--warn-ink)}
+@keyframes alarm{50%{background:#c0271d}}
+
+/* ------------------------------------------------------------------ body */
+.body{flex:1;min-height:0;display:grid;grid-template-columns:330px 1fr}
+.lanes{
+  border-right:1px solid var(--line);padding:16px 18px;overflow-y:auto;
+  background:var(--panel);
+}
+.panel-title{
+  font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--dimmer);
+  margin:0 0 14px;font-weight:400;
+}
+.lane{margin-bottom:15px}
+.lane-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.lane-id{font-size:16px;font-weight:700;letter-spacing:.05em}
+.lane-nums{font-size:12px;color:var(--dim)}
+.lane-nums .h{color:var(--accent);font-weight:600}
+.lane-nums .e{color:var(--fg)}
+.lane-bar{height:6px;background:#141b25;border-radius:2px;overflow:hidden;margin-top:6px;display:flex}
+.lane-bar i{background:var(--accent);transition:width .45s ease}
+.lane-bar u{background:#2c3949;flex:1;text-decoration:none}
+.lane-foot{font-size:11px;color:var(--dimmer);margin-top:4px;letter-spacing:.04em}
+.lane-foot .w{color:var(--dim)}
+.inflight{
+  margin-top:22px;padding-top:14px;border-top:1px solid var(--line);
+  font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--dimmer);
+}
+.inflight b{color:var(--fg);font-size:15px;letter-spacing:0}
+
+/* ------------------------------------------------------------------ feed */
+.feed-wrap{display:flex;flex-direction:column;min-width:0;min-height:0}
+.feed-head{
+  display:flex;justify-content:space-between;padding:14px 20px 10px;
+  font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--dimmer);
+  border-bottom:1px solid var(--line);flex:0 0 auto;
+}
+.feed{flex:1;overflow-y:auto;padding:4px 0 20px}
+.row{
+  display:grid;grid-template-columns:46px 1fr 104px 86px 190px;
+  align-items:center;gap:12px;
+  padding:7px 20px 7px 18px;border-left:2px solid transparent;
+  border-bottom:1px solid rgba(24,32,44,.55);
+  animation:enter .22s ease-out;
+}
+@keyframes enter{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.r-agent{font-weight:700;color:var(--dim);font-size:14px}
+.r-cmd{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px}
+.r-dur{text-align:right;font-size:14px;color:var(--dim)}
+.r-note{font-size:12px;color:var(--dimmer);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{
+  display:inline-block;text-align:center;font-size:11px;letter-spacing:.13em;
+  padding:2px 0;border-radius:2px;border:1px solid var(--line-2);color:var(--dim);
+}
+
+.row.hit{border-left-color:var(--accent);background:var(--accent-soft)}
+.row.hit .r-agent{color:var(--fg)}
+.row.hit .badge{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.row.hit .r-note{color:var(--accent)}
+.row.hit .r-dur{color:var(--accent);font-weight:600}
+.row.hit.big .r-dur{font-size:17px}
+.row.hit.big .r-cmd{font-weight:600}
+
+/* An agent that blocked on a peer's in-flight work instead of duplicating it.
+   Deliberately not a third hue: hollow and dashed reads as "a hit that had to
+   wait", which is what it is. */
+.row.wait{border-left:2px dashed var(--accent);background:rgba(47,224,138,.04)}
+.row.wait .badge{border-color:var(--accent);border-style:dashed;color:var(--accent);background:transparent}
+.row.wait .r-cmd,.row.wait .r-dur{color:var(--dim)}
+.row.wait .r-note{color:var(--dim)}
+
+.row.miss .r-cmd{color:var(--fg)}
+.row.pass{opacity:.62}
+.row.pass .badge{border-style:dotted}
+
+.row.divergent{background:rgba(255,68,56,.16);border-left-color:var(--warn)}
+.row.divergent .badge{background:var(--warn);border-color:var(--warn);color:#fff;font-weight:700}
+.row.divergent .r-note{color:var(--warn);font-weight:600}
+
+.empty{padding:40px 20px;color:var(--dimmer);font-size:13px}
+
+@media (max-width:1080px){
+  .body{grid-template-columns:1fr}
+  .lanes{border-right:0;border-bottom:1px solid var(--line);max-height:190px}
+  .hero{flex-direction:column;align-items:stretch;gap:22px}
+  .row{grid-template-columns:40px 1fr 92px 74px;}
+  .r-note{display:none}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <span class="brand-name">HINDSIGHT</span>
+    <span class="brand-sub">build cache for parallel agents</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="controls">
+    <label for="daemon">daemon</label>
+    <input type="text" id="daemon" value="http://127.0.0.1:7777" spellcheck="false" autocomplete="off">
+    <button id="connect" type="button">connect</button>
+    <button id="speed" type="button">&times;25</button>
+    <button id="pause" type="button">pause</button>
+  </div>
+  <div class="status" id="status"><i class="dot"></i><span id="status-text">starting</span></div>
+</header>
+
+<section class="hero">
+  <div class="counter">
+    <div class="delta" id="delta"></div>
+    <div class="counter-value" id="deleted"><span id="deleted-num">0.0</span><span class="unit">s</span></div>
+    <div class="counter-label">execution-seconds deleted</div>
+    <div class="counter-sub">
+      <b id="c-served">0</b> served<span class="sep">/</span><b id="c-executed">0</b> executed<span class="sep">/</span><b id="c-rate">0%</b> hit rate
+    </div>
+  </div>
+  <div class="clocks">
+    <div class="clock-row">
+      <div class="clock ghost">
+        <div class="clock-label">if every agent executed everything</div>
+        <div class="clock-value" id="clock-counter">00:00</div>
+      </div>
+      <div class="clock">
+        <div class="clock-label">actual execution time</div>
+        <div class="clock-value" id="clock-actual">00:00</div>
+      </div>
+    </div>
+    <div>
+      <div class="gap-track">
+        <div class="gap-actual" id="gap-actual" style="width:100%"></div>
+        <div class="gap-deleted" id="gap-deleted" style="width:0%"></div>
+      </div>
+      <div class="gap-legend">
+        <span>executed</span>
+        <span class="on"><span id="gap-pct">0%</span> deleted</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="verify" id="verify">
+  <span><b id="v-served">0</b>served</span>
+  <span><b id="v-verified">0</b>verified</span>
+  <span class="ok" id="v-div-wrap"><b id="v-divergent">0</b>divergent</span>
+  <span class="verify-note" id="v-note">served results are re-executed in the background and diffed after normalisation</span>
+</section>
+
+<div class="body">
+  <aside class="lanes">
+    <h2 class="panel-title">agents</h2>
+    <div id="lanes"></div>
+    <div class="inflight">in flight <b id="inflight">0</b></div>
+  </aside>
+  <main class="feed-wrap">
+    <div class="feed-head"><span>live command feed</span><span>newest first</span></div>
+    <div class="feed" id="feed"><div class="empty">waiting for the first decision&hellip;</div></div>
+  </main>
+</div>
+
+<!-- Fallback copy of fixture.jsonl. Chrome refuses fetch() of a sibling file
+     over file://, so a standalone demo needs the data in the document. The
+     file on disk is preferred whenever it is actually reachable. -->
+<script type="application/x-ndjson" id="fixture-data">__FIXTURE_JSONL__</script>
+
+<script>
+(function () {
+  'use strict';
+
+  var DEFAULT_DAEMON = 'http://127.0.0.1:7777';
+  var CONNECT_TIMEOUT_MS = 2500;   // EventSource errors are opaque; time out instead
+  var FEED_MAX = 240;
+  var SPEEDS = [1, 10, 25, 60];
+  var BIG_HIT_MS = 5000;           // worth drawing the eye to
+  var LOOP_PAUSE_MS = 4000;
+
+  var speedIdx = 2, paused = false;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var el = {
+    daemon: $('daemon'), connect: $('connect'), speed: $('speed'), pause: $('pause'),
+    status: $('status'), statusText: $('status-text'),
+    deleted: $('deleted'), deletedNum: $('deleted-num'), delta: $('delta'),
+    cServed: $('c-served'), cExecuted: $('c-executed'), cRate: $('c-rate'),
+    clockCounter: $('clock-counter'), clockActual: $('clock-actual'),
+    gapActual: $('gap-actual'), gapDeleted: $('gap-deleted'), gapPct: $('gap-pct'),
+    verify: $('verify'), vServed: $('v-served'), vVerified: $('v-verified'),
+    vDivergent: $('v-divergent'), vNote: $('v-note'),
+    lanes: $('lanes'), inflight: $('inflight'), feed: $('feed')
+  };
+
+  // ------------------------------------------------------------------ state
+  var state, shownDeleted = 0;
+
+  function freshState() {
+    return {
+      deletedMs: 0, executedMs: 0,
+      served: 0, executed: 0, waits: 0,
+      verified: 0, divergent: 0, inflight: 0,
+      agents: {}, agentOrder: [], sawStats: false
+    };
+  }
+
+  function agentSlot(id) {
+    if (!state.agents[id]) {
+      state.agents[id] = { hit: 0, exec: 0, wait: 0, deletedMs: 0 };
+      state.agentOrder.push(id);
+      state.agentOrder.sort();
+    }
+    return state.agents[id];
+  }
+
+  function resetAll() {
+    state = freshState();
+    shownDeleted = 0;
+    el.feed.innerHTML = '<div class="empty">waiting for the first decision&hellip;</div>';
+    render();
+  }
+
+  // ----------------------------------------------------------- formatting
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  function clockText(ms) {
+    var t = Math.round(ms / 1000);
+    var h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    return h ? h + ':' + pad(m) + ':' + pad(s) : pad(m) + ':' + pad(s);
+  }
+
+  function durText(ms) {
+    if (!ms) return '0ms';
+    if (ms < 1000) return Math.round(ms) + 'ms';
+    if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+    var m = Math.floor(ms / 60000), s = Math.round((ms % 60000) / 1000);
+    if (s === 60) { m += 1; s = 0; }
+    return m + 'm' + pad(s) + 's';
+  }
+
+  // --------------------------------------------------------------- render
+  function render() {
+    var counterfactual = state.executedMs + state.deletedMs;
+    var demand = state.served + state.executed;
+
+    el.cServed.textContent = state.served;
+    el.cExecuted.textContent = state.executed;
+    el.cRate.textContent = demand ? Math.round(100 * state.served / demand) + '%' : '0%';
+
+    el.clockCounter.textContent = clockText(counterfactual);
+    el.clockActual.textContent = clockText(state.executedMs);
+
+    var pct = counterfactual > 0 ? (100 * state.deletedMs / counterfactual) : 0;
+    el.gapDeleted.style.width = pct.toFixed(1) + '%';
+    el.gapActual.style.width = (100 - pct).toFixed(1) + '%';
+    el.gapPct.textContent = Math.round(pct) + '%';
+
+    el.vServed.textContent = state.served;
+    el.vVerified.textContent = state.verified;
+    el.vDivergent.textContent = state.divergent;
+    if (state.divergent > 0) {
+      el.verify.className = 'verify loud';
+      el.vNote.textContent = 'a served result did not match a re-execution — evict and stop quoting the counter';
+    } else {
+      el.verify.className = 'verify';
+      el.vNote.textContent = state.served > state.verified
+        ? (state.served - state.verified) + ' awaiting shadow re-execution'
+        : 'served results are re-executed in the background and diffed after normalisation';
+    }
+
+    el.inflight.textContent = state.inflight;
+    renderLanes();
+  }
+
+  function renderLanes() {
+    var out = '';
+    for (var i = 0; i < state.agentOrder.length; i++) {
+      var id = state.agentOrder[i], a = state.agents[id];
+      var total = a.hit + a.exec;
+      var hitPct = total ? (100 * a.hit / total) : 0;
+      out += '<div class="lane">'
+        + '<div class="lane-top"><span class="lane-id">' + id + '</span>'
+        + '<span class="lane-nums"><span class="h">' + a.hit + '</span> hit '
+        + '<span class="dim">/</span> <span class="e">' + a.exec + '</span> exec</span></div>'
+        + '<div class="lane-bar"><i style="width:' + hitPct.toFixed(1) + '%"></i><u></u></div>'
+        + '<div class="lane-foot">' + durText(a.deletedMs) + ' deleted'
+        + (a.wait ? '<span class="w"> &middot; ' + a.wait + ' lease wait' + (a.wait > 1 ? 's' : '') + '</span>' : '')
+        + '</div></div>';
+    }
+    el.lanes.innerHTML = out || '<div class="lane-foot">no agents yet</div>';
+  }
+
+  // The counter eases toward its target so a big hit is visible as motion
+  // rather than as a number that was already different when you looked away.
+  function tickCounter() {
+    var diff = state.deletedMs - shownDeleted;
+    if (Math.abs(diff) < 0.6) shownDeleted = state.deletedMs;
+    else shownDeleted += diff * 0.15;
+    var next = (shownDeleted / 1000).toFixed(1);
+    if (next !== el.deletedNum.textContent) el.deletedNum.textContent = next;
+    requestAnimationFrame(tickCounter);
+  }
+
+  function flashDelta(ms) {
+    el.delta.textContent = '+' + durText(ms);
+    el.delta.classList.remove('go');
+    void el.delta.offsetWidth;
+    el.delta.classList.add('go');
+    el.deleted.classList.add('pulse');
+    setTimeout(function () { el.deleted.classList.remove('pulse'); }, 420);
+  }
+
+  // ----------------------------------------------------------------- feed
+  function cell(cls, text, title) {
+    var s = document.createElement('span');
+    s.className = cls;
+    s.textContent = text;
+    if (title) s.title = title;
+    return s;
+  }
+
+  function pushRow(r) {
+    var empty = el.feed.querySelector('.empty');
+    if (empty) empty.remove();
+
+    var d = r.decision || 'PASSTHROUGH';
+    var row = document.createElement('div');
+    row.className = 'row ' + (
+      d === 'HIT' ? 'hit' : d === 'LEASE_WAIT' ? 'wait' : d === 'MISS' ? 'miss' : 'pass'
+    );
+    if (d === 'HIT' && (r.duration_ms || 0) >= BIG_HIT_MS) row.className += ' big';
+    if (r.verified === false) row.className += ' divergent';
+
+    var note;
+    if (r.verified === false) note = 'DIVERGENT — re-execution differed';
+    else if (d === 'HIT') note = 'served from ' + (r.source_agent || '?');
+    else if (d === 'LEASE_WAIT') note = 'waiting on ' + (r.source_agent || 'peer');
+    else note = r.reason || '';
+
+    row.appendChild(cell('r-agent', r.agent || '?'));
+    row.appendChild(cell('r-cmd', r.cmd || '', r.cmd + '\n' + (r.key || '')));
+    row.appendChild(cell('badge', d === 'LEASE_WAIT' ? 'WAIT' : d));
+    row.appendChild(cell('r-dur', durText(r.duration_ms || 0)));
+    row.appendChild(cell('r-note', note, note));
+
+    el.feed.insertBefore(row, el.feed.firstChild);
+    while (el.feed.children.length > FEED_MAX) el.feed.removeChild(el.feed.lastElementChild);
+  }
+
+  // ------------------------------------------------------------- ingestion
+  function onDecision(r) {
+    var d = r.decision, ms = Number(r.duration_ms) || 0;
+    var a = agentSlot(r.agent || '?');
+
+    if (d === 'HIT') {
+      state.served++; state.deletedMs += ms; a.hit++; a.deletedMs += ms;
+      if (ms >= BIG_HIT_MS) flashDelta(ms);
+    } else if (d === 'LEASE_WAIT') {
+      state.waits++; a.wait++;
+    } else {
+      state.executed++; state.executedMs += ms; a.exec++;
+    }
+    if (r.verified === false) state.divergent++;
+
+    pushRow(r);
+    render();
+  }
+
+  // The daemon's stats event is authoritative for the counts, which also lets
+  // a viewer that connects mid-run catch up. seconds_deleted only ever moves
+  // up: a counter that ticks backwards reads as a bug even when it is not.
+  function onStats(s) {
+    state.sawStats = true;
+    if (isFinite(s.served)) state.served = s.served;
+    if (isFinite(s.executed)) state.executed = s.executed;
+    if (isFinite(s.seconds_deleted)) {
+      state.deletedMs = Math.max(state.deletedMs, s.seconds_deleted * 1000);
+    }
+    if (isFinite(s.verified)) state.verified = s.verified;
+    if (isFinite(s.divergent)) state.divergent = Math.max(state.divergent, s.divergent);
+    if (isFinite(s.inflight)) state.inflight = s.inflight;
+    if (isFinite(s.agents)) { for (var i = 1; i <= s.agents; i++) agentSlot('a' + i); }
+    render();
+  }
+
+  function dispatch(ev) {
+    if (!ev || typeof ev !== 'object') return;
+    if (ev.type === 'stats') onStats(ev);
+    else if (ev.type === 'decision' && ev.record) onDecision(ev.record);
+  }
+
+  function handleRaw(text) {
+    try { dispatch(JSON.parse(text)); } catch (e) { /* a bad line is not worth a dead viewer */ }
+  }
+
+  // ------------------------------------------------------------- transport
+  var es = null, replay = null;
+
+  function setStatus(mode, text) {
+    el.status.className = 'status' + (mode ? ' ' + mode : '');
+    el.statusText.textContent = text;
+  }
+
+  function teardown() {
+    if (es) { es.close(); es = null; }
+    if (replay) { clearTimeout(replay.timer); replay = null; }
+  }
+
+  function connect(url) {
+    teardown();
+    resetAll();
+    url = (url || DEFAULT_DAEMON).replace(/\/+$/, '');
+    setStatus('', 'connecting to ' + url);
+
+    // A file:// page has a null origin, so the daemon must answer /events with
+    // Access-Control-Allow-Origin: *. Without it this fails silently and we
+    // drop to the fixture, which looks identical from the outside.
+    try { es = new EventSource(url + '/events'); }
+    catch (e) { startFixture('no daemon'); return; }
+
+    var opened = false;
+    var timer = setTimeout(function () {
+      if (!opened) { teardown(); startFixture('daemon did not respond'); }
+    }, CONNECT_TIMEOUT_MS);
+
+    es.onopen = function () {
+      opened = true; clearTimeout(timer);
+      setStatus('live', 'live \u00b7 ' + url);
+    };
+    es.onmessage = function (e) {
+      if (!opened) { opened = true; clearTimeout(timer); setStatus('live', 'live \u00b7 ' + url); }
+      handleRaw(e.data);
+    };
+    es.onerror = function () {
+      if (!opened) { clearTimeout(timer); teardown(); startFixture('daemon unreachable'); }
+      else setStatus('', 'reconnecting \u00b7 ' + url);
+    };
+  }
+
+  // --------------------------------------------------------------- fixture
+  function loadFixture() {
+    // Prefer the file on disk so the fixture can be edited without touching
+    // this document; fall back to the inlined copy when file:// blocks fetch.
+    return fetch('fixture.jsonl', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.text() : ''; })
+      .catch(function () { return ''; })
+      .then(function (t) {
+        if (t && t.trim()) return t;
+        var node = document.getElementById('fixture-data');
+        return node ? node.textContent : '';
+      });
+  }
+
+  function parseFixture(text) {
+    var out = [], lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (!line) continue;
+      try { out.push(JSON.parse(line)); } catch (e) { /* skip */ }
+    }
+    return out;
+  }
+
+  function tsOf(ev) {
+    return (ev && ev.type === 'decision' && ev.record && isFinite(ev.record.ts))
+      ? ev.record.ts : null;
+  }
+
+  function startFixture(why) {
+    teardown();
+    setStatus('fixture', 'replaying fixture' + (why ? ' \u00b7 ' + why : ''));
+    loadFixture().then(function (text) {
+      var events = parseFixture(text);
+      if (!events.length) {
+        setStatus('', 'no daemon and no fixture');
+        return;
+      }
+      // Gap in seconds of recorded time before each event; nulls (stats
+      // events) follow immediately after whatever they summarise.
+      var gaps = new Array(events.length), last = null;
+      for (var i = 0; i < events.length; i++) {
+        var t = tsOf(events[i]);
+        gaps[i] = (t === null || last === null) ? null : Math.max(0, t - last);
+        if (t !== null) last = t;
+      }
+      resetAll();
+      replay = { events: events, gaps: gaps, i: 0, timer: null };
+      step();
+    });
+  }
+
+  function step() {
+    if (!replay || paused) return;
+    if (replay.i >= replay.events.length) {
+      replay.timer = setTimeout(function () {
+        if (!replay) return;
+        resetAll(); replay.i = 0; step();
+      }, LOOP_PAUSE_MS);
+      return;
+    }
+    dispatch(replay.events[replay.i++]);
+    var gap = replay.gaps[replay.i];
+    var ms = (gap === null || gap === undefined)
+      ? 40
+      : Math.min(1100, Math.max(45, gap * 1000 / SPEEDS[speedIdx]));
+    replay.timer = setTimeout(step, ms);
+  }
+
+  // --------------------------------------------------------------- controls
+  el.connect.addEventListener('click', function () { connect(el.daemon.value); });
+  el.daemon.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') connect(el.daemon.value);
+  });
+  el.speed.addEventListener('click', function () {
+    speedIdx = (speedIdx + 1) % SPEEDS.length;
+    el.speed.innerHTML = '&times;' + SPEEDS[speedIdx];
+  });
+  el.pause.addEventListener('click', function () {
+    paused = !paused;
+    el.pause.textContent = paused ? 'resume' : 'pause';
+    if (!replay) return;
+    if (paused) clearTimeout(replay.timer);
+    else step();
+  });
+
+  // ------------------------------------------------------------------ boot
+  var q = /[?&]daemon=([^&]+)/.exec(location.search);
+  if (q) el.daemon.value = decodeURIComponent(q[1]);
+
+  resetAll();
+  requestAnimationFrame(tickCounter);
+  connect(el.daemon.value);
+})();
+</script>
+</body>
+</html>

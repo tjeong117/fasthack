@@ -13,6 +13,7 @@ const usage = `hindsight - a build cache for coding agents
   hindsight key [dir]                       print tree hash and env fingerprint
   hindsight record <key> -- <cmd>...        run a command and record the result
   hindsight daemon [--addr host:port]       shared cache daemon
+  hindsight verify [--limit N]              re-execute served results and diff
   hindsight stats                           print counters from the daemon
   hindsight init                            install hook config into this repo
 
@@ -40,6 +41,8 @@ func main() {
 		err = cmdRecord(os.Args[2:])
 	case "daemon":
 		err = cmdDaemon(os.Args[2:])
+	case "verify":
+		err = cmdVerify(os.Args[2:])
 	case "stats":
 		err = cmdStats(os.Args[2:])
 	case "init":
