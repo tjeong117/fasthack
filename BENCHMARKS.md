@@ -278,6 +278,14 @@ fastpath — and lands within 8% at every hit rate it reports (342 ms against my
 342 ms at p = 0.53; 3,264 ms against my 3,188 ms at p = 0.075). Two framings
 agreeing is the best evidence available that neither is arithmetic error.
 
+These use median end-to-end timings, which is what `bench.sh` reports and what
+a user on a loaded laptop actually experiences. Two independent estimates of
+`M` come out lower: summing the components gives 28.2 ms, and taking minima
+rather than medians gives 28.5 ms. Those agree with each other and suggest the
+median is carrying about 7 ms of host noise. Using 28.5 ms would lower every
+threshold in the table by roughly 15% and would not change any conclusion
+below.
+
 ### Does the arithmetic support `DefaultMinDurationMS = 500`?
 
 Partly. The *existence* of a floor is strongly supported. The *value* is not
@@ -405,9 +413,11 @@ cwd, which removes it entirely.
 
 Adding up what is genuinely available: 12.45 ms from caching workspace
 resolution, 2.58 ms from a leaner binary. A small-repo interception would fall
-from 34.9 ms to **19.9 ms, a 43% reduction**, moving the p = 0.533 threshold
-from 113 ms to about 78 ms. Real, and not transformative: two git spawns and
-one process launch remain, and they are 15 ms.
+from 34.9 ms to **19.9 ms, a 43% reduction**. Only the workspace saving moves
+the marginal cost `M`, because a leaner binary makes the fastpath cheaper too
+and cancels, so the p = 0.533 threshold would fall from 113 ms to about 90 ms.
+Real, and not transformative: two git spawns and one process launch remain, and
+they are 15 ms.
 
 **The daemon is not a bottleneck and should not be optimized.** Serial round
 trip is 0.056 ms on a miss and 0.181 ms on a hit — the hit is more expensive
@@ -415,8 +425,9 @@ because the daemon appends a record to the log and broadcasts it before
 replying. Under concurrency (`DaemonLookupConcurrent`; note the labels are
 multipliers of `GOMAXPROCS`, so on this twelve-core host they are 12, 60 and
 240 in-flight lookups) per-operation cost is 0.016 ms, 0.009 ms and 0.010 ms
-respectively — roughly 100,000 lookups per second with no degradation. The
-single mutex and single log file are not straining at fleet scale.
+respectively — 61,000 to 109,000 lookups per second, improving with concurrency
+rather than degrading. The single mutex and single log file are not straining
+at fleet scale.
 
 **The classifier is free.** `ClassifyMix` is **1.35 µs** on a 35-command mix
 spanning every branch. This project had been quoting 14 µs, which is **10×
