@@ -137,7 +137,13 @@ func isHindsightEntry(item any) bool {
 		if !ok {
 			continue
 		}
-		if cmd, ok := hm["command"].(string); ok && filepath.Base(firstField(cmd)) == "hindsight" {
+		// Match the same way doctor does. Keying on the binary being named
+		// exactly "hindsight" means a binary built to any other name is not
+		// recognised as ours, so init appends a second copy of its own entry
+		// instead of replacing the first — the hook then fires twice per
+		// command, and the config file changes on every init, which moves the
+		// tree hash and invalidates the whole cache.
+		if cmd, ok := hm["command"].(string); ok && isHindsightCommand(cmd) {
 			return true
 		}
 	}
