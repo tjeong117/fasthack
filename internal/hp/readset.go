@@ -397,27 +397,28 @@ var readSetAutoDiscovered = map[string]bool{
 // firstUnsafeAddition returns the first added path that could change what the
 // command reads, together with the argument for why it could.
 //
-// The narrowness here is load-bearing, and it rests on a precondition this
-// function does not check: ScopeMatchObserved refuses whenever any file *in*
-// the read set changed, and it does so for every diff that reaches this point.
-// So the import graph rooted at the command's entry points is byte-identical
-// to the one we measured, and an import graph that did not change cannot
-// suddenly reach a file that did not exist when we measured it. Every rule
-// below is therefore about the ways a file gets picked up *without* being
-// imported by something -- by a directory being scanned, or by a name being
-// resolved against a search path.
+// The narrowness here is load-bearing, and it leans on a condition enforced
+// elsewhere: a promotion also requires that no file *in* the read set changed,
+// which ScopeMatchObserved checks further down. Given that, the import graph
+// rooted at the command's entry points is byte-identical to the one we
+// measured, and a graph that did not change cannot suddenly reach a file that
+// did not exist when we measured it. So the only additions that matter are the
+// ones picked up *without* being imported by something -- by a directory being
+// scanned, or by a name being resolved against a search path -- and those are
+// what this enumerates.
 //
 // Everything else -- a new README, a new module in a package nothing imports,
-// a new fixture in a directory no test was collected from -- is unreachable
-// from an unchanged import graph, and refusing it only costs hits. The earlier
-// rule refused on any added .py and on anything sharing a directory with
-// anything the run read, which in a repo with a root-level conftest.py meant
-// every addition anywhere refused, which in a fan-out where agents add files
-// constantly meant almost nothing promoted.
+// a new fixture in a directory no test was collected from -- is unreachable,
+// and refusing it only costs hits. The earlier rule refused on any added .py
+// and on anything sharing a directory with anything the run read, which in a
+// repo with a root-level conftest.py meant every addition anywhere refused,
+// which in a fan-out where agents add files constantly meant almost nothing
+// promoted.
 //
 // The residual risk is code in the read set that globs a directory at runtime
 // and opens what it finds. sys.modules cannot see that, and neither can we.
-// Rule 3 covers where it actually happens -- fixtures under a test directory.
+// The test-directory rule below covers where it actually happens: fixtures
+// sitting under a directory tests were collected from.
 func firstUnsafeAddition(added []string, rs *ReadSet) (string, string) {
 	testDirs := rs.testDirs()
 	roots := rs.importRoots()
