@@ -45,6 +45,41 @@ command -v hindsight >/dev/null 2>&1 || {
 	exit 2
 }
 
+# The live arm drives real coding agents. Pick a driver unless the caller has
+# already chosen one, so `--live` works without anyone having to know the flag
+# set each CLI needs.
+#
+# Both drivers need more than fleet.sh's default `codex exec
+# --dangerously-bypass-hook-trust`: that flag only lets the hook run, and the
+# agent still has to be allowed to execute the pytest commands it is being
+# asked to execute. Reasoning effort is pinned low because the demo prompt
+# names the three commands outright; there is nothing to deliberate about, and
+# the default effort spends about ninety seconds per agent doing so.
+if [ "$LIVE" = 1 ] && [ -z "${FLEET_AGENT_CMD:-}" ]; then
+	if command -v codex >/dev/null 2>&1; then
+		FLEET_AGENT_CMD='codex exec --dangerously-bypass-hook-trust --dangerously-bypass-approvals-and-sandbox -c model_reasoning_effort="low" "$1"'
+	elif command -v claude >/dev/null 2>&1; then
+		FLEET_AGENT_CMD='claude -p "$1" --permission-mode bypassPermissions'
+	else
+		echo "demo-run: --live needs 'codex' or 'claude' on PATH." >&2
+		echo "  Set FLEET_AGENT_CMD to drive a different CLI; it receives the prompt as \$1." >&2
+		exit 2
+	fi
+	export FLEET_AGENT_CMD
+	printf 'demo-run: live driver  %s\n' "$FLEET_AGENT_CMD"
+fi
+
+# The live arm needs the PreToolUse hook installed in the target repo, and it
+# must be COMMITTED there: agents run in `git worktree add` checkouts, which
+# materialise tracked files only. An untracked .codex/hooks.json in the main
+# clone never reaches a single agent, and the run silently measures nothing.
+if [ "$LIVE" = 1 ] && [ ! -f "$REPO/.codex/hooks.json" ]; then
+	echo "demo-run: no PreToolUse hook in $REPO — the live arm would measure nothing." >&2
+	echo "  Install and commit it:" >&2
+	echo "    (cd $REPO && hindsight init && git add .codex .claude && git commit -m 'hindsight hook')" >&2
+	exit 2
+fi
+
 DAEMON_PIDS=()
 cleanup() {
 	[ "$KEEP_DAEMON" = 1 ] && return 0
@@ -82,8 +117,12 @@ run_arm() {
 	fi
 
 	if [ "$LIVE" = 1 ]; then
+		# A live agent that finishes takes about 25s. Seven minutes is enough
+		# headroom for a slow model and short enough that one wedged agent
+		# does not hold the demo hostage.
 		bash "$HERE/scripts/fleet.sh" --repo "$REPO" --prompt "$HERE/scripts/demo-prompt.md" \
-			--agents "$AGENTS" --mode "$mode" --out "$out" --hp-home "$home" --daemon "$url"
+			--agents "$AGENTS" --mode "$mode" --out "$out" --hp-home "$home" --daemon "$url" \
+			--timeout 420
 	else
 		FLEET_AGENT_CMD="bash $HERE/scripts/replay-agent.sh $HERE/scripts/demo-cmds.txt" \
 			bash "$HERE/scripts/fleet.sh" --repo "$REPO" --prompt "deterministic replay" \
