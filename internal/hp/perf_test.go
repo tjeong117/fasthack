@@ -20,13 +20,19 @@ package hp
 //	go test ./internal/hp/ -run XXX -bench . -benchtime 10x -count 3
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -44,8 +50,12 @@ const perfFixtureVersion = "v1"
 // Generating them costs more than every measurement in this file put together,
 // so they are cached between runs rather than rebuilt per benchmark. That also
 // keeps the page cache warm, which is the realistic condition: an agent's
-// worktree is not cold. scripts/bench.sh removes this directory when it
-// finishes; set HP_PERF_FIXTURES to relocate it.
+// worktree is not cold.
+//
+// The consequence is that a plain `go test -bench .` leaves about a hundred
+// thousand files behind on purpose. `scripts/bench.sh --with-go` points
+// HP_PERF_FIXTURES at its own temp directory and removes them; otherwise
+// delete $TMPDIR/hindsight-perf-v1 by hand when you are done.
 func perfFixtureRoot(tb testing.TB) string {
 	dir := os.Getenv("HP_PERF_FIXTURES")
 	if dir == "" {
@@ -63,6 +73,23 @@ type perfRepoSpec struct {
 	files  int
 	python bool // gitignored .venv with installed distributions
 	node   bool // gitignored node_modules with installed packages
+
+	// nodeEntries and nodeLockBytes size the node fixture; zero means the
+	// perfNode* defaults.
+	//
+	// They exist because the default fixture understates the node path. A
+	// real package-lock.json is megabytes and the fingerprint hashes it
+	// whole, twice per intercepted command, so a fixture with a 50-byte
+	// lockfile measures the readdir and none of the read.
+	nodeEntries   int
+	nodeLockBytes int
+}
+
+func (s perfRepoSpec) nodeEntryCount() int {
+	if s.nodeEntries > 0 {
+		return s.nodeEntries
+	}
+	return perfNodeEntries
 }
 
 type perfRepo struct {
@@ -112,8 +139,9 @@ func perfGetRepo(tb testing.TB, spec perfRepoSpec) *perfRepo {
 func perfStampPath(root string) string { return root + ".stamp" }
 
 func perfStampBody(spec perfRepoSpec) string {
-	return fmt.Sprintf("%s files=%d python=%v node=%v dists=%d node_entries=%d",
-		perfFixtureVersion, spec.files, spec.python, spec.node, perfDistInfos, perfNodeEntries)
+	return fmt.Sprintf("%s files=%d python=%v node=%v dists=%d node_entries=%d lock_bytes=%d",
+		perfFixtureVersion, spec.files, spec.python, spec.node, perfDistInfos,
+		spec.nodeEntryCount(), spec.nodeLockBytes)
 }
 
 func perfStampMatches(root string, spec perfRepoSpec) bool {
@@ -194,7 +222,7 @@ func perfBuildRepo(tb testing.TB, root string, spec perfRepoSpec, files []string
 		perfBuildVenv(tb, root)
 	}
 	if spec.node {
-		perfBuildNodeModules(tb, root)
+		perfBuildNodeModules(tb, root, spec)
 	}
 
 	perfGit(tb, root, "add", "-A")
@@ -224,25 +252,55 @@ func perfBuildVenv(tb testing.TB, root string) {
 	}
 }
 
-// perfBuildNodeModules writes a node_modules with perfNodeEntries top-level
-// entries, perfNodeScopes of which are scopes the fingerprint has to descend
-// into. The lockfile and the package manager's own record are both present,
-// because without them the node ecosystem correctly abstains and the
+// perfLockfileBody produces a package-lock.json of about n bytes.
+//
+// The content is never parsed — hashFiles folds the raw bytes into the
+// fingerprint — but it is shaped like a real lockfile so that the entry sizes,
+// and therefore the read, are representative. n <= 0 gives the stub lockfile,
+// which is enough to stop the node ecosystem abstaining but measures no read.
+func perfLockfileBody(n int) []byte {
+	if n <= 0 {
+		return []byte(`{"name":"fixture","lockfileVersion":3,"packages":{}}`)
+	}
+	var b strings.Builder
+	b.Grow(n + 256)
+	b.WriteString(`{"name":"fixture","lockfileVersion":3,"packages":{`)
+	for i := 0; b.Len() < n; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `"node_modules/pkg-%05d":{"version":"1.%d.%d",`+
+			`"resolved":"https://registry.npmjs.org/pkg-%05d/-/pkg-%05d-1.%d.%d.tgz",`+
+			`"integrity":"sha512-%s","license":"MIT"}`,
+			i, i%20, i%7, i, i, i%20, i%7, strings.Repeat("a", 64))
+	}
+	b.WriteString("}}")
+	return []byte(b.String())
+}
+
+// perfBuildNodeModules writes a node_modules with spec.nodeEntryCount()
+// top-level entries, perfNodeScopes of which are scopes the fingerprint has to
+// descend into. The lockfile and the package manager's own record are both
+// present, because without them the node ecosystem correctly abstains and the
 // measurement would be of the abstention path rather than the real one.
-func perfBuildNodeModules(tb testing.TB, root string) {
+func perfBuildNodeModules(tb testing.TB, root string, spec perfRepoSpec) {
+	entries := spec.nodeEntryCount()
+	lock := perfLockfileBody(spec.nodeLockBytes)
+
 	perfWrite(tb, filepath.Join(root, "package.json"),
 		[]byte(`{"name":"fixture","version":"1.0.0","dependencies":{}}`))
-	perfWrite(tb, filepath.Join(root, "package-lock.json"),
-		[]byte(`{"name":"fixture","lockfileVersion":3,"packages":{}}`))
+	perfWrite(tb, filepath.Join(root, "package-lock.json"), lock)
 	nm := filepath.Join(root, "node_modules")
 	perfMkdir(tb, nm)
-	perfWrite(tb, filepath.Join(nm, ".package-lock.json"),
-		[]byte(`{"name":"fixture","lockfileVersion":3,"packages":{}}`))
-	for i := 0; i < perfNodeEntries-perfNodeScopes; i++ {
-		pkg := filepath.Join(nm, fmt.Sprintf("pkg-%03d", i))
+	// npm writes its own copy inside node_modules, so a realistic install has
+	// two megabyte-scale files in the fingerprint, not one.
+	perfWrite(tb, filepath.Join(nm, ".package-lock.json"), lock)
+
+	for i := 0; i < entries-perfNodeScopes; i++ {
+		pkg := filepath.Join(nm, fmt.Sprintf("pkg-%04d", i))
 		perfMkdir(tb, pkg)
 		perfWrite(tb, filepath.Join(pkg, "package.json"),
-			[]byte(fmt.Sprintf(`{"name":"pkg-%03d","version":"1.0.%d"}`, i, i%9)))
+			[]byte(fmt.Sprintf(`{"name":"pkg-%04d","version":"1.0.%d"}`, i, i%9)))
 	}
 	for s := 0; s < perfNodeScopes; s++ {
 		for j := 0; j < perfNodeInScope; j++ {
@@ -405,6 +463,11 @@ func BenchmarkEnvFingerprint(b *testing.B) {
 		{name: "deps-python", files: 100, python: true},
 		{name: "deps-node", files: 100, node: true},
 		{name: "deps-both", files: 5_000, python: true, node: true},
+		// A mid-size real Node app: npm hoists ~1250 packages to the top
+		// level and writes a megabyte-scale lockfile at the root and another
+		// inside node_modules. The fingerprint hashes both whole, so this is
+		// the only node case that measures the read as well as the readdir.
+		{name: "deps-node-real", files: 100, node: true, nodeEntries: 1_250, nodeLockBytes: 1 << 20},
 	}
 	for _, spec := range cases {
 		b.Run(strings.TrimPrefix(spec.name, "deps-"), func(b *testing.B) {
@@ -740,6 +803,413 @@ func BenchmarkDaemonLookupHit(b *testing.B) {
 		}
 		if resp.Decision != DecisionHit {
 			b.Fatalf("expected HIT, got %s", resp.Decision)
+		}
+	}
+	perfMillis(b)
+}
+
+// BenchmarkDaemonLookupConcurrent is the round trip under fan-out.
+//
+// A serial number flatters the daemon: the whole premise is N agents running
+// at once, and the daemon serializes index access behind one mutex and appends
+// to one log file. If the round trip degrades with concurrency then the cost
+// model built from the serial number understates what a real fleet pays.
+//
+// Distinct keys per iteration, for the same reason as the serial miss
+// benchmark: repeating a key measures the lease, not the round trip.
+func BenchmarkDaemonLookupConcurrent(b *testing.B) {
+	for _, n := range []int{1, 5, 20} {
+		b.Run(fmt.Sprintf("%d_agents", n), func(b *testing.B) {
+			perfDaemon(b)
+
+			// One shared client with an idle pool sized for the fan-out. Note
+			// that SetParallelism multiplies by GOMAXPROCS, so "20 agents" is
+			// 20 x GOMAXPROCS goroutines.
+			//
+			// The default transport keeps two idle connections per host. At
+			// benchmark rates every goroutine beyond those two opens and closes
+			// a socket per request, and the ephemeral port range runs out
+			// before the timer does — the benchmark fails with "can't assign
+			// requested address" rather than reporting anything.
+			//
+			// Pooling is the right instrument here anyway. Real agents are
+			// separate short-lived processes issuing one request each and never
+			// reuse a connection at all, so what is in question is whether the
+			// daemon's single mutex and single log file degrade under
+			// concurrency, not how fast this process can open sockets.
+			conns := n * runtime.GOMAXPROCS(0) * 2
+			c := NewClient()
+			c.http = &http.Client{
+				Transport: &http.Transport{MaxIdleConns: conns, MaxIdleConnsPerHost: conns},
+				Timeout:   time.Minute,
+			}
+
+			var seq atomic.Int64
+			b.SetParallelism(n)
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					key := fmt.Sprintf("hs-v1:perf-conc-%d", seq.Add(1))
+					if _, err := c.Lookup(LookupReq{
+						Key: key, Agent: "perf", Cmd: "pytest -q", CmdNorm: "pytest -q",
+						CwdRel: ".", Policy: "SERVE", Serve: true,
+					}); err != nil {
+						b.Error(err)
+						return
+					}
+				}
+			})
+			perfMillis(b)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 5. Process startup — the floor under every hook on every command
+// ---------------------------------------------------------------------------
+
+// perfRepoRoot walks up from the test's working directory for the go.mod.
+func perfRepoRoot(tb testing.TB) string {
+	dir, err := os.Getwd()
+	if err != nil {
+		tb.Skipf("no working directory: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			tb.Skip("go.mod not found above the test directory")
+		}
+		dir = parent
+	}
+}
+
+// perfGoBuild compiles source into its own throwaway module and returns the
+// binary path. Stdlib only, so it works offline.
+func perfGoBuild(tb testing.TB, name, source string) string {
+	if _, err := exec.LookPath("go"); err != nil {
+		tb.Skip("go toolchain not on PATH")
+	}
+	dir := filepath.Join(tb.TempDir(), name)
+	perfMkdir(tb, dir)
+	perfWrite(tb, filepath.Join(dir, "go.mod"), []byte("module "+name+"\n\ngo 1.21\n"))
+	perfWrite(tb, filepath.Join(dir, "main.go"), []byte(source))
+	out := filepath.Join(dir, name+".bin")
+	cmd := exec.Command("go", "build", "-o", out, ".")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOFLAGS=", "GO111MODULE=on")
+	if b, err := cmd.CombinedOutput(); err != nil {
+		tb.Skipf("cannot build %s fixture: %v\n%s", name, err, b)
+	}
+	return out
+}
+
+// perfGoMinimalSrc is the smallest possible Go program: runtime startup and
+// nothing else.
+const perfGoMinimalSrc = `package main
+
+func main() {}
+`
+
+// perfGoHooklikeSrc links the packages the real hook binary links and does
+// what the disabled hook does — read one environment variable and exit.
+//
+// The difference between this and the minimal binary is what the dependency
+// set costs at startup: a bigger image for dyld to map and more package init
+// to run, before a single line of hook logic executes.
+const perfGoHooklikeSrc = `package main
+
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"flag"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+)
+
+var sink any
+
+func main() {
+	if os.Getenv("HP_ENABLE") != "1" {
+		return
+	}
+	// Unreachable in the benchmark, but it keeps the linker from dropping
+	// the imports whose init cost is the thing being measured.
+	sink = []any{sha256.New(), base64.StdEncoding, json.Marshal,
+		flag.CommandLine, http.DefaultClient, exec.Command, filepath.Join}
+}
+`
+
+// BenchmarkProcessStartup decomposes the cost of being a hook at all.
+//
+// A PreToolUse hook is a process the harness spawns before every command, so
+// its startup is a tax on every command in the session including the ones that
+// pass straight through. Nothing in the design can remove it; the only
+// question is how big it is and how much of it is Go's rather than the
+// operating system's.
+//
+//   - os_true: fork, exec and exit of a tiny C binary. The kernel's price.
+//   - go_minimal: the same, for an empty Go program. The delta is the Go
+//     runtime's own startup.
+//   - go_hooklike: an empty Go program that links the hook's dependency set.
+//     The delta from go_minimal is image size and package init.
+//   - hindsight_disabled: the real binary on its kill-switch path. This is the
+//     genuine floor a user pays per command, and the number the marginal cost
+//     of interception has to be measured against.
+func BenchmarkProcessStartup(b *testing.B) {
+	trueBin, err := exec.LookPath("true")
+	if err != nil {
+		trueBin = "/usr/bin/true"
+	}
+
+	var hindsightBin string
+	if _, err := exec.LookPath("go"); err == nil {
+		out := filepath.Join(b.TempDir(), "hindsight")
+		cmd := exec.Command("go", "build", "-o", out, "./cmd/hindsight")
+		cmd.Dir = perfRepoRoot(b)
+		cmd.Env = append(os.Environ(), "GOFLAGS=")
+		if msg, err := cmd.CombinedOutput(); err != nil {
+			// Somebody else's in-flight edit can break the build. That must
+			// cost this sub-benchmark and nothing else.
+			b.Logf("cannot build cmd/hindsight, skipping that case: %v\n%s", err, msg)
+		} else {
+			hindsightBin = out
+		}
+	}
+
+	cases := []struct {
+		name string
+		bin  string
+		args []string
+	}{
+		{"os_true", trueBin, nil},
+		{"go_minimal", perfGoBuild(b, "gominimal", perfGoMinimalSrc), nil},
+		{"go_hooklike", perfGoBuild(b, "gohooklike", perfGoHooklikeSrc), nil},
+		{"hindsight_disabled", hindsightBin, []string{"hook"}},
+	}
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			if c.bin == "" {
+				b.Skip("binary unavailable")
+			}
+			devNull, err := os.Open(os.DevNull)
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer devNull.Close()
+			spawn := func() {
+				cmd := exec.Command(c.bin, c.args...)
+				// The kill switch is what makes this the floor rather than a
+				// full interception, so make sure it is off.
+				cmd.Env = append(os.Environ(), "HP_ENABLE=")
+				cmd.Stdin = devNull
+				if err := cmd.Run(); err != nil {
+					b.Fatal(err)
+				}
+			}
+			// The first execution of a freshly built binary on macOS pays for
+			// dyld, the page cache and a one-time signature check: measured at
+			// 227 ms against 6 ms warm. A real session pays that once per
+			// binary, so charging it to every command would be wrong by a
+			// factor of thirty.
+			for i := 0; i < 3; i++ {
+				spawn()
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				spawn()
+			}
+			perfMillis(b)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 6. The fastpath — what a command the memo already knows costs
+// ---------------------------------------------------------------------------
+
+// perfWriteFastpath lays down a memo of n entries and returns its home.
+func perfWriteFastpath(tb testing.TB, n int) string {
+	home := tb.TempDir()
+	f := LoadFastpath(home)
+	for i := 0; i < n; i++ {
+		f.Observe(fmt.Sprintf("pytest -q tests/test_module%05d.py", i), int64(i%900))
+	}
+	f.Save()
+	return home
+}
+
+// BenchmarkFastpathLoad is the cost of consulting the duration memo.
+//
+// The hook is a fresh process per command, so it re-reads and re-parses the
+// whole memo every time — there is no warm map to inherit. That makes the
+// memo's size a per-command cost, and a long-running fleet only ever adds to
+// it. If this grows faster than the two tree hashes it exists to avoid, the
+// optimization inverts.
+func BenchmarkFastpathLoad(b *testing.B) {
+	for _, n := range []int{0, 100, 1_000, 10_000} {
+		b.Run(fmt.Sprintf("%d_entries", n), func(b *testing.B) {
+			home := perfWriteFastpath(b, n)
+			if fi, err := os.Stat(filepath.Join(home, "fastpath.json")); err == nil {
+				b.ReportMetric(float64(fi.Size())/1024, "KB_memo")
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				LoadFastpath(home)
+			}
+			perfMillis(b)
+		})
+	}
+}
+
+// BenchmarkFastpathKnownFast is the lookup itself, once the memo is loaded.
+//
+//   - always_cheap: the name-based shortcut, which never touches the map.
+//   - hit: a command the memo knows is below the floor, so the hook bails.
+//   - miss: a command the memo has never seen, so the hook goes on to hash.
+func BenchmarkFastpathKnownFast(b *testing.B) {
+	home := perfWriteFastpath(b, 1_000)
+	f := LoadFastpath(home)
+	floor := int64(DefaultMinDurationMS)
+	cases := []struct{ name, cmd string }{
+		{"always_cheap", "echo hello"},
+		{"hit", "pytest -q tests/test_module00042.py"},
+		{"miss", "uv run pytest -q tests/test_billing.py"},
+	}
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				f.KnownFast(c.cmd, floor)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 7. Hook envelope — payload in, decision out
+// ---------------------------------------------------------------------------
+
+const perfHookPayload = `{"session_id":"bench","cwd":"/tmp/work/agent3",` +
+	`"tool_name":"Bash","tool_input":{"command":"uv run pytest -q tests/test_billing.py"}}`
+
+// BenchmarkHookEnvelope is the JSON either side of the decision. It is here to
+// be ruled out of the cost model rather than because it is expected to matter.
+func BenchmarkHookEnvelope(b *testing.B) {
+	b.Run("parse", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, ok := ParseHookInput(strings.NewReader(perfHookPayload)); !ok {
+				b.Fatal("payload did not parse")
+			}
+		}
+	})
+	b.Run("rewrite", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if err := Rewrite(io.Discard, HarnessClaude,
+				"cat /tmp/blobs/ab/abc; cat /tmp/blobs/cd/cde >&2; exit 0",
+				"hindsight: served from a2 (4634ms deleted)"); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// 8. Store open — what the record path pays as the corpus grows
+// ---------------------------------------------------------------------------
+
+// perfWriteLog lays down a log.jsonl of n records shaped like real ones, and
+// returns the cache home holding it.
+func perfWriteLog(tb testing.TB, n int) string {
+	home := tb.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "blobs"), 0o755); err != nil {
+		tb.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(home, "log.jsonl"))
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer f.Close()
+	w := bufio.NewWriterSize(f, 1<<20)
+	enc := json.NewEncoder(w)
+	for i := 0; i < n; i++ {
+		rec := &Record{
+			V: 1, TS: float64(i), Agent: fmt.Sprintf("a%d", i%5),
+			Cmd:        fmt.Sprintf("uv run pytest -q tests/test_module%05d.py", i),
+			CmdNorm:    fmt.Sprintf("uv run pytest -q tests/test_module%05d.py", i),
+			CwdRel:     ".",
+			TreeBefore: fmt.Sprintf("%040x", i), EnvFPBefore: fmt.Sprintf("%032x", i),
+			TreeAfter: fmt.Sprintf("%040x", i), EnvFPAfter: fmt.Sprintf("%032x", i),
+			Key:    fmt.Sprintf("hs-v1:%064x", i),
+			Policy: "SERVE", Decision: DecisionMiss, Servable: true,
+			DurationMS: int64(i % 5000),
+			StdoutBlob: fmt.Sprintf("sha256:%064x", i),
+			StderrBlob: fmt.Sprintf("sha256:%064x", i+1),
+		}
+		if err := enc.Encode(rec); err != nil {
+			tb.Fatal(err)
+		}
+	}
+	if err := w.Flush(); err != nil {
+		tb.Fatal(err)
+	}
+	return home
+}
+
+// BenchmarkStoreOpen is the cost of rebuilding the in-memory index by scanning
+// the append-only log.
+//
+// The daemon pays this once at startup, which is the case the design is
+// written for and is entirely reasonable. But `hindsight record` calls
+// OpenStore on every miss, in a fresh process, solely to write two blobs — and
+// PutBlob needs only the Paths, never the replayed index. So this scan is on
+// the critical path of every uncached command, and it grows with the corpus
+// the cache is accumulating.
+//
+// 100k records is not a stretch: five agents on one task produced hundreds,
+// and a shared team cache is append-only forever.
+func BenchmarkStoreOpen(b *testing.B) {
+	for _, n := range []int{0, 1_000, 10_000, 100_000} {
+		b.Run(fmt.Sprintf("%d_records", n), func(b *testing.B) {
+			home := perfWriteLog(b, n)
+			if fi, err := os.Stat(filepath.Join(home, "log.jsonl")); err == nil {
+				b.ReportMetric(float64(fi.Size())/(1<<20), "MB_log")
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := OpenStore(home); err != nil {
+					b.Fatal(err)
+				}
+			}
+			perfMillis(b)
+		})
+	}
+}
+
+// BenchmarkStorePutBlob is what the record path actually needs from the store,
+// for comparison with the scan above.
+func BenchmarkStorePutBlob(b *testing.B) {
+	store, err := OpenStore(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	// A test suite's output, which is the class of command worth caching.
+	payload := []byte(strings.Repeat("test_module.py::test_case PASSED\n", 2_000))
+	b.ReportMetric(float64(len(payload))/1024, "KB_blob")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Distinct content each time; an identical blob short-circuits on the
+		// stat and would measure the deduplication rather than the write.
+		if _, err := store.PutBlob(append(payload, byte(i), byte(i>>8))); err != nil {
+			b.Fatal(err)
 		}
 	}
 	perfMillis(b)

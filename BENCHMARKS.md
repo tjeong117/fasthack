@@ -2,11 +2,11 @@
 
 ## The finding
 
-**Serving a command from cache costs 95 ms on a 20,000-file repository and 45 ms on a
+**Serving a command from cache costs 97 ms on a 20,000-file repository and 43 ms on a
 100-file one.** Anything an agent runs that is faster than that is made slower by the
-cache, on every hit, forever. That is the best case, assuming the cache never misses.
-At the 53% hit rate measured on a real five-agent fan-out the threshold is 254 ms; at
-the 7.5% the replayed SWE-bench corpus gives, it is 2.3 seconds.
+cache, on every hit, forever. That is the best case, assuming the cache never misses. At
+the 53% hit rate measured on a real five-agent fan-out the threshold is 263 ms; at the
+7.5% the replayed SWE-bench corpus gives, it is 2.4 seconds.
 
 Three things follow.
 
@@ -20,13 +20,18 @@ enough there that only genuinely slow commands are worth intercepting.
 derivation is the four `git` processes the hook starts. Git costs 6.5 ms to start and do
 nothing; the actual tree hashing at 100 files is 1 ms. The daemon round trip everyone
 suspects costs 0.057 ms, which is under a fifth of one percent of the hook. Every
-optimisation worth doing is about starting fewer processes.
+optimisation worth doing is about starting fewer processes, and the largest single one
+available is that `hindsight record` re-resolves a worktree the hook already resolved:
+12.4 ms of pure duplication on every miss.
 
-**The shipping duration floor is set too low for a large repository.** A 50 ms constant is
-about right for a small repo, where the measured floor is 45 ms. On a 20,000-file repo the
-real floor is 95 ms, and three commands the classifier marks `SERVE` land in the gap:
-`git status --porcelain` (61 ms), `grep -c` over a data file (69 ms) and `find` (72 ms).
-They clear the shipping floor, get cached, and cost more to serve than to run.
+**The duration floor now catches everything that was being cached at a loss, and it
+overshoots.** The classifier on its own is wildly permissive — `echo`, `pwd`, `basename`,
+`cat`, `ls`, `wc`, `head` are all `SERVE` and all run in under 7 ms — but the 500 ms floor
+that landed during this measurement refuses every one of them, correctly. The error is now
+in the other direction. On a 20,000-file repo the measured break-even at the real fleet
+hit rate is 263 ms, so commands between 263 ms and 500 ms are refused despite being worth
+serving. That is the safe direction to be wrong in, and the gap is worth about half the
+addressable range.
 
 ---
 
@@ -193,14 +198,16 @@ Decomposing the spawn:
 | `/usr/bin/true` — the OS process-creation floor | 1.8 ms |
 | `git --version` — plus loading and starting git | 6.3 ms |
 | `git rev-parse --git-dir` — plus repository discovery | 6.7 ms |
-| `/bin/sh -c true` | 4.9 ms |
-| `$SHELL -lc true` — how the harness invokes hooks | **32.7 ms** |
+| `/bin/sh -c true` | 3.9 ms |
+| `/bin/zsh -c true` | 3.6 ms |
+| `$SHELL -lc true` — how the harness invokes hooks | **23.5 ms** |
 
 Two things fall out of this table. Starting git costs 4.5 ms before it does anything, and
 the hook starts four of them. And if the harness really runs hooks under a login shell as
-`AGENTS.md` states, then **27.7 ms is added to every number in this document**, on every
-command, including the ones that pass straight through. That surcharge is a property of
-the user's dotfiles rather than of Hindsight, but it is not optional and it is not small.
+`AGENTS.md` states, then **roughly 22 ms is added to every number in this document**, on
+every command, including the ones that pass straight through. That surcharge is a property
+of the user's dotfiles rather than of Hindsight, but it is not optional and it is not
+small. `bench.sh` reproduces it as a `login-shell` row and got 24 ms.
 
 ## 4. Classifier
 
@@ -251,8 +258,13 @@ Measured in-process over loopback, isolated from everything else.
 | `/lookup` returning HIT | **0.180 ms** |
 
 A hit is three times a miss because the daemon appends a record to the log and broadcasts
-it before replying. Both are irrelevant next to a single git spawn. **The daemon is not
-where the time goes and optimising it would be a waste of effort.**
+it before replying. Both are irrelevant next to a single git spawn.
+
+It does not degrade under fan-out either. Driving the same endpoint from 1, 5 and 20 times
+`GOMAXPROCS` goroutines gives 0.017, 0.012 and 0.011 ms per lookup — it gets *cheaper* per
+operation as concurrency rises, because the single mutex and single log file are nowhere
+near saturated and the fixed per-request cost amortises across in-flight work. **The daemon
+is not where the time goes, and optimising it would be a waste of effort.**
 
 ## 6. End-to-end hook latency
 
@@ -264,48 +276,54 @@ samples per path after 3 warmups.
 
 | path | median | p95 |
 |---|---:|---:|
-| `HP_ENABLE` unset (binary spawn only) | 6.33 ms | 7.54 ms |
-| passthrough (classifier rejects) | 6.74 ms | 7.84 ms |
-| known-fast (duration memo bails) | 6.93 ms | 7.88 ms |
-| **miss** | **36.65 ms** | 40.87 ms |
-| **hit** | **36.09 ms** | 38.31 ms |
-| **daemon down** (fail open) | **36.28 ms** | 41.55 ms |
-| replay (`cat out; cat err >&2; exit 0`) | 9.23 ms | 9.86 ms |
-| `hindsight record` wrapper overhead | 43.2 ms | — |
+| `HP_ENABLE` unset (binary spawn only) | 5.96 ms | 7.16 ms |
+| passthrough (classifier rejects) | 6.10 ms | 7.93 ms |
+| known-fast (duration memo bails) | 6.39 ms | 8.77 ms |
+| **miss** | **36.44 ms** | 70.52 ms |
+| **hit** | **33.94 ms** | 38.07 ms |
+| **daemon down** (fail open) | **34.01 ms** | 39.59 ms |
+| replay (`cat out; cat err >&2; exit 0`) | 8.70 ms | 9.68 ms |
+| `hindsight record` wrapper overhead | 40.6 ms | — |
 
 **Large repository — 20,000 files**
 
 | path | median | p95 |
 |---|---:|---:|
-| `HP_ENABLE` unset (binary spawn only) | 6.73 ms | 8.63 ms |
-| passthrough (classifier rejects) | 6.29 ms | 8.13 ms |
-| known-fast (duration memo bails) | 6.61 ms | 10.35 ms |
-| **miss** | **91.14 ms** | 95.90 ms |
-| **hit** | **87.69 ms** | 93.15 ms |
-| **daemon down** (fail open) | **89.66 ms** | 93.79 ms |
-| replay | 7.05 ms | 7.58 ms |
-| `hindsight record` wrapper overhead | 90.7 ms | — |
+| `HP_ENABLE` unset (binary spawn only) | 6.03 ms | 8.04 ms |
+| passthrough (classifier rejects) | 6.03 ms | 6.48 ms |
+| known-fast (duration memo bails) | 6.26 ms | 10.55 ms |
+| **miss** | **91.24 ms** | 108.90 ms |
+| **hit** | **88.13 ms** | 100.35 ms |
+| **daemon down** (fail open) | **89.97 ms** | 98.43 ms |
+| replay | 8.85 ms | 12.04 ms |
+| `hindsight record` wrapper overhead | 98.0 ms | — |
 
 The record overhead is the measured difference between running `grep -cF payload
 bench-data.txt` bare and running it through the wrapper the hook rewrites a miss into. It
 is a second `NewWorkspace`, a second `State()`, two blob writes and a `POST /record`.
 
-Three rows deserve comment.
+Four rows deserve comment.
 
 **The fail-open path is the same price as a working cache.** With the daemon down the hook
-still classifies, still resolves the worktree, still hashes the tree and still fingerprints
-the environment, and only then discovers the connection is refused. A user who has not
-started the daemon pays 90 ms per command on a large repository and receives nothing at
-all in exchange. The hook fails open correctly — nothing breaks — but it fails open late.
+still classifies, still consults the memo, still resolves the worktree, still hashes the
+tree and still fingerprints the environment, and only then discovers the connection is
+refused. A user who has not started the daemon pays 90 ms per command on a large
+repository and receives nothing at all in exchange. The hook fails open correctly —
+nothing breaks — but it fails open late.
 
-**A passthrough still costs 6.3 ms.** Every command an agent runs, including every `curl`
+**A passthrough still costs 6.0 ms.** Every command an agent runs, including every `curl`
 and `date` and unrecognised head, pays a Go binary spawn. Add the login shell and it is
-34 ms.
+28 ms.
 
-**The duration memo works, and costs one file read.** Once a command has been seen running
-under the floor three times, the hook bails at 6.6 ms instead of 91 ms. That is the single
-most effective thing in the system. Note the three: every fast command pays full price
-three times before the memo will act on it.
+**The duration memo works, and costs one file read.** Once a command is known cheap the
+hook bails at 6.3 ms instead of 91 ms. That is the single most effective mechanism in the
+system, and at two required samples it now costs 182 ms on a large repo to learn one
+command's verdict rather than the 273 ms it did at three.
+
+**The `alwaysCheap` head list makes that free for the obvious cases.** `echo`, `pwd`,
+`true`, `false`, `:`, `basename`, `dirname` and `printf` short-circuit with no observations
+at all. This is worth knowing when reading these numbers: the `miss` and `daemon-down` rows
+had to be measured with `grep`, because an `echo` never reaches the key path any more.
 
 ## 7. Break-even
 
@@ -323,9 +341,9 @@ at `p = 0.1` each hit carries nine.
 
 | repository | hit path | miss path | **p = 1.00** | **p = 0.53** | **p = 0.075** |
 |---|---:|---:|---:|---:|---:|
-| 100 files | 36.1 + 9.2 | 36.7 + 43.2 | **45 ms** | **115 ms** | **1,030 ms** |
-| 20,000 files | 87.7 + 7.1 | 91.1 + 90.7 | **95 ms** | **254 ms** | **2,337 ms** |
-| 50,000 files *(extrapolated)* | 173 + 7 | 177 + 176 | **180 ms** | **490 ms** | **4,537 ms** |
+| 100 files | 33.9 + 8.7 | 36.4 + 40.6 | **43 ms** | **110 ms** | **993 ms** |
+| 20,000 files | 88.1 + 8.8 | 91.2 + 98.0 | **97 ms** | **263 ms** | **2,431 ms** |
+| 50,000 files *(extrapolated)* | 174 + 9 | 177 + 184 | **183 ms** | **499 ms** | **4,630 ms** |
 
 The 50,000-file row extrapolates by adding the measured 85.7 ms difference between the
 20,000- and 50,000-file warm tree hash to each of the two `State()` calls. It is not
@@ -336,50 +354,73 @@ measured end to end.
 the way Hindsight actually keys, and the design doc already flags that as the honest
 figure for that population.
 
-**Stated plainly: on a 20,000-file repository, commands faster than 95 milliseconds cost
+**Stated plainly: on a 20,000-file repository, commands faster than 97 milliseconds cost
 more to cache than they save even if every one of them hits. At the realistically
-achievable hit rate the threshold is 254 milliseconds.**
+achievable hit rate the threshold is 263 milliseconds.**
 
-Add the login shell surcharge and every one of these numbers rises by roughly 28 ms.
+Add the login shell surcharge and every one of these numbers rises by roughly 22 ms.
+
+This differs from the arithmetic in `fastpath.go`, which asks `hit_rate × duration > 42 ms`
+and drops the hit path's own cost. The two agree to within a few percent at low hit rates,
+where the miss tax dominates and the omitted term is small. They diverge at high hit rates:
+at `p = 1` that formula gives 42 ms where the measured floor on a large repo is 97 ms.
+Since the shipping constant sits at 500 ms, well above both, the difference does not change
+any decision today — but it would if the constant were ever tuned downward from it.
 
 ## 8. Does the shipping classifier serve things below break-even?
 
-Yes. Measured on the 20,000-file repository, where the floor is 94.7 ms. The classifier
-column comes from `hindsight key --cmd`, so it is the shipping policy and not a
-transcription of it.
+**The classifier does. The duration floor in front of it does not, any more.**
 
-| command | classifier | actual duration | verdict |
+Measured on the 20,000-file repository, where the measured floor is 97.0 ms and the
+shipping floor is 500 ms. The classifier column comes from `hindsight key --cmd`, so it is
+the shipping policy and not a transcription of it.
+
+| command | classifier | actual duration | outcome |
 |---|---|---:|---|
-| `echo hello` | SERVE | 3.5 ms | below 50 ms; memo catches it |
-| `pwd` | SERVE | 3.6 ms | below 50 ms; memo catches it |
-| `basename /usr/local/bin/hindsight` | SERVE | 4.7 ms | below 50 ms; memo catches it |
-| `cat .gitignore` | SERVE | 4.8 ms | below 50 ms; memo catches it |
-| `ls src` | SERVE | 5.0 ms | below 50 ms; memo catches it |
-| `wc -l .gitignore` | SERVE | 4.8 ms | below 50 ms; memo catches it |
-| `head -n 5 .gitignore` | SERVE | 5.1 ms | below 50 ms; memo catches it |
-| `git log --oneline -20` | SERVE | 9.7 ms | below 50 ms; memo catches it |
-| `git diff --stat HEAD` | SERVE | 33.9 ms | below 50 ms; memo catches it |
-| `git status --porcelain` | SERVE | 61.2 ms | **cached, and a net loss** |
-| `grep -c payload bench-data.txt` | SERVE | 68.7 ms | **cached, and a net loss** |
-| `find src -name file00001.go` | SERVE | 72.2 ms | **cached, and a net loss** |
-| `grep -rn Fixture07 src` | SERVE | 1,990 ms | worth serving |
-| `sort bench-data.txt` | SERVE | 754 ms | worth serving |
+| `echo hello` | SERVE | 4.5 ms | refused; correctly |
+| `pwd` | SERVE | 5.0 ms | refused; correctly |
+| `basename /usr/local/bin/hindsight` | SERVE | 6.4 ms | refused; correctly |
+| `cat .gitignore` | SERVE | 6.3 ms | refused; correctly |
+| `ls src` | SERVE | 6.3 ms | refused; correctly |
+| `wc -l .gitignore` | SERVE | 6.2 ms | refused; correctly |
+| `head -n 5 .gitignore` | SERVE | 5.9 ms | refused; correctly |
+| `git log --oneline -20` | SERVE | 11.1 ms | refused; correctly |
+| `git diff --stat HEAD` | SERVE | 29.6 ms | refused; correctly |
+| `git status --porcelain` | SERVE | 65.6 ms | refused; correctly |
+| `grep -c payload bench-data.txt` | SERVE | 69.7 ms | refused; correctly |
+| `find src -name file00001.go` | SERVE | 99.7 ms | refused; marginal loss either way |
+| `find src -type f` | SERVE | 101.0 ms | refused; marginal loss either way |
+| `sort bench-data.txt` | SERVE | 676 ms | served, worth it |
+| `grep -rn Fixture07 src` | SERVE | 1,276 ms | served, worth it |
+| `grep -rl Fixture00 src` | SERVE | 1,370 ms | served, worth it |
 
-The classifier on its own is wildly permissive about cheap commands: `echo`, `pwd`,
-`basename`, `cat`, `ls`, `wc`, `head` are all in `readHeads` and all come back `SERVE`
-despite running in under 6 ms. Caching any of them is an 18× to 27× slowdown.
+Every one of the sixteen probes is `SERVE`. The classifier has no notion of cost at all:
+`echo`, `pwd`, `basename`, `cat`, `ls`, `wc` and `head` are in `readHeads` and come back
+`SERVE` while running in under 7 ms, and caching those would be a 14× to 22× slowdown.
+Left to itself the classifier is a liability.
 
-The duration memo that landed during this work is what saves it, and it does save it — the
-nine commands under 50 ms are all correctly skipped. But two gaps remain:
+The duration floor is what makes the system honest, and it works. Nothing in this table is
+cached at a loss.
 
-1. **The floor is a constant and the cost is not.** `DefaultMinDurationMS = 50` is a good
-   fit for the 45 ms floor on a small repository. On a 20,000-file repository the floor is
-   95 ms and on a 50,000-file one about 180 ms, so the window between 50 ms and the real
-   floor is where commands get cached at a loss. Three of the fourteen probes above land
-   in it.
-2. **The memo needs three samples.** A command pays full interception cost three times
-   before it can be skipped. On a large repo that is 273 ms spent to learn that `echo` is
-   cheap, per distinct command string, per cache home.
+Two things are worth saying about how it got there. First, the floor moved from 50 ms to
+500 ms while this measurement was in progress, and at 50 ms three of these commands —
+`git status --porcelain`, `grep -c` and `find` — did clear the floor and get cached below
+break-even. That gap is closed.
+
+Second, the floor now overshoots, which is the right direction but is not free:
+
+- **Refused but profitable at the fleet hit rate.** The break-even on this repository at
+  `p = 0.53` is 263 ms, so anything between 263 ms and the 500 ms constant is refused
+  despite being worth serving. None of the probes above land in that band, but it is a real
+  and populated one: `pytest` on a single test file, `go vet` on one package,
+  `tsc --noEmit` on a small project, and `npm test` on a trivial suite all typically sit
+  there.
+- **The floor is a constant and the cost is not.** 500 ms is 11× the 43 ms break-even on a
+  small repository and 5× the 97 ms on a large one. A single constant cannot be right for
+  both, and it is most wrong exactly where the cache is cheapest to run.
+- **Learning still costs.** At two samples a command pays full interception twice before
+  the memo can skip it — 182 ms on a large repo per distinct command string per cache home.
+  The `alwaysCheap` head list removes that cost for the eight obvious heads.
 
 ## 9. Threats to validity
 
@@ -393,19 +434,24 @@ nine commands under 50 ms are all correctly skipped. But two gaps remain:
 - **The 50,000-file end-to-end row is extrapolated**, not measured.
 - **`p = 0.53` and `p = 0.075` are quoted from the design doc**, not measured here. The
   break-even formula is mine; the hit rates are not.
-- **The login shell surcharge is conditional.** It is measured (27.7 ms on this machine
-  with these dotfiles) but I did not verify that either harness actually invokes hooks that
-  way; that claim comes from `AGENTS.md`.
+- **The login shell surcharge is conditional.** It is measured (22 ms on this machine with
+  these dotfiles) but I did not verify that either harness actually invokes hooks that way;
+  that claim comes from `AGENTS.md`.
 - **Fixtures are cached between runs**, so the page cache is warm. That is the realistic
   condition for an agent's worktree, but it means "cold" here means a cold git index, never
   a cold disk.
+- **The duration floor moved from 50 ms to 500 ms mid-measurement**, and `fastpathSamples`
+  from 3 to 2. Every number in sections 1 to 7 is independent of that; section 8 and the
+  recommendations were re-measured against the current constants. If they move again this
+  document is stale, which is why `bench.sh` reads `DefaultMinDurationMS` out of the source
+  rather than restating it.
 
 ## 10. Recommendations
 
 Ordered by how much time they return per unit of effort. The first one is the one to do.
 
 **1. Stop starting so many git processes.** This is the whole game. On a small repository
-96% of the key path is process spawn, and the hook starts four git processes plus the
+95% of the key path is process spawn, and the hook starts four git processes plus the
 `record` wrapper's four more. Two of them are pure waste: `hindsight record` calls
 `NewWorkspace` to re-resolve a worktree root and git dir that the hook already knows and
 could pass as two more flags alongside `--tree` and `--envfp`. That is 12.4 ms off every
@@ -416,31 +462,32 @@ in the fastpath file that is already being read, would take another 12.4 ms off 
 intercepted command. Together that is roughly a third of the hook on a small repository.
 Nothing else on this list comes close.
 
-**2. Make the duration floor track the measured tree hash instead of being a constant.**
-`DefaultMinDurationMS = 50` is right for a small repo and wrong for a large one, and the
-gap is exactly where commands get cached at a loss. The hook already has everything it
-needs: it can time its own `State()` call and persist a rolling maximum next to the
-fastpath memo, then derive the floor as **`tree_hash + 25 ms`**. That fits all three
-measured points — 39 ms against a measured 45 at 100 files, 96 against 95 at 20,000, and
-181 against an extrapolated 180 at 50,000 — because the hit path is one tree hash plus a
-binary spawn, a daemon round trip and the replay. It is still the `p = 1` floor and
-therefore the most permissive defensible choice; a hit-rate-aware floor would be higher
-again. `hindsight doctor` should print whatever it derives. Its existing
-`slowTreeHash = 200 ms` warning threshold is also too high — a 50,000-file repo at 156 ms
-warm is paying over 300 ms per intercepted command and gets no warning at all.
+**2. Derive the duration floor from the measured tree hash instead of hardcoding it.** The
+500 ms constant is safe but blunt: it is 11× the 43 ms break-even on a small repository and
+5× the 97 ms on a large one, and the band between the real break-even and 500 ms is
+refused work that would have paid. The hook already has what it needs to do better — it can
+time its own `State()` call and persist a rolling maximum beside the memo, then use
+**`tree_hash + 25 ms`** as the `p = 1` floor. That fits all three measured points: 39 ms
+against a measured 43 at 100 files, 96 against 97 at 20,000, and 181 against an
+extrapolated 183 at 50,000. Scale it by the observed hit rate, which the daemon already
+knows, and you get a floor that is 110 ms on a small repo and 263 ms on a large one rather
+than 500 ms on both. `hindsight doctor` should print whatever it derives. Its
+`slowTreeHash = 200 ms` warning threshold wants revisiting too — a 50,000-file repo at
+156 ms warm pays over 300 ms per intercepted command and currently gets no warning at all.
 
-**3. Consult the duration memo before the daemon, not just before the hash — and seed it
-faster.** Requiring three samples means every cheap command is intercepted at full price
-three times. Two would halve that; better still, admit a command to the memo after a single
-observation if it came in under a quarter of the floor, since a command that ran in 3 ms
-is not going to turn out to be expensive. Keep three samples for anything near the
-boundary, which is what the existing comment is actually worried about.
+**3. Fail open early when the daemon is down.** This is the worst cell in the whole matrix
+and it is also the most likely state for a new user. With no daemon running, the hook does
+the entire key path — memo read, two `rev-parse` calls, `git add -A`, `git write-tree`,
+environment fingerprint — and only then discovers the connection is refused, at 90 ms per
+command on a large repository for nothing at all. A `/healthz` result cached in the memo
+file with a few seconds' TTL would turn that into the 6.3 ms known-fast path.
 
-**4. Fail open early when the daemon is down.** A `/healthz` result cached in the fastpath
-file for a few seconds would turn the 90 ms daemon-down path into the 6.6 ms known-fast
-path. As it stands, a user who forgot to start the daemon pays full interception cost on
-every command and gets nothing, which is the worst cell in the whole matrix and also the
-most likely default state for a new user.
+**4. Consider admitting to the memo on one sample when the margin is wide.** Two samples is
+already much better than three, but a command that ran in 5 ms against a 500 ms floor is
+not going to turn out to be expensive, and it currently pays full interception twice to
+prove it. One observation under, say, a tenth of the floor is enough; keep two for anything
+near the boundary, which is the case the existing comment is actually worried about. This
+is worth a good deal less than the first three and should be done last, if at all.
 
 **Not worth doing:** optimising the daemon (0.06% of the hook), optimising the classifier
 (0.003%), optimising the environment fingerprint (0.6–1.4%), or adding a repository size

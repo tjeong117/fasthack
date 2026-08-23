@@ -104,7 +104,7 @@ func TestScopePromotesDisjointPeerEdit(t *testing.T) {
 		scopeWrite(t, root, "src/auth.py", "def login(): return 42\n")
 	})
 
-	d := ScopeMatch(root, recorded, current, "pytest tests/test_billing.py")
+	d := ScopeMatch(root, recorded, current, "wc -l tests/test_billing.py")
 	scopeCheck(t, d, true)
 	if !scopeEqual(d.ChangedPaths, []string{"src/auth.py"}) {
 		t.Fatalf("changed paths = %v, want [src/auth.py]", d.ChangedPaths)
@@ -123,7 +123,7 @@ func TestScopeRefusesWhenTheScopedFileChanged(t *testing.T) {
 		scopeWrite(t, root, "tests/test_billing.py", "def test_total(): assert False\n")
 	})
 
-	scopeCheck(t, ScopeMatch(root, recorded, current, "pytest tests/test_billing.py"), false)
+	scopeCheck(t, ScopeMatch(root, recorded, current, "wc -l tests/test_billing.py"), false)
 }
 
 // A change inside a scoped directory is inside the scope. Getting this
@@ -137,7 +137,7 @@ func TestScopeRefusesChangeInsideScopedDirectory(t *testing.T) {
 		scopeWrite(t, root, "tests/test_billing.py", "def test_total(): assert False\n")
 	})
 
-	for _, cmd := range []string{"pytest tests", "pytest tests/", "pytest ./tests"} {
+	for _, cmd := range []string{"wc -l tests", "wc -l tests/", "wc -l ./tests"} {
 		d := ScopeMatch(root, recorded, current, cmd)
 		if d.Promoted {
 			t.Fatalf("%q promoted despite a change inside its scope: %s", cmd, d.Reason)
@@ -157,7 +157,7 @@ func TestScopeSrcIsNotAPrefixOfSrc2(t *testing.T) {
 		scopeWrite(t, root, "src2/other.py", "y = 2\n")
 	})
 
-	d := ScopeMatch(root, recorded, current, "ruff check src")
+	d := ScopeMatch(root, recorded, current, "wc -l src")
 	scopeCheck(t, d, true)
 	if !scopeEqual(d.ScopePaths, []string{"src"}) {
 		t.Fatalf("scope paths = %v, want [src]", d.ScopePaths)
@@ -194,7 +194,7 @@ func TestScopeRefusesUnscopedCommand(t *testing.T) {
 		scopeWrite(t, root, "src/auth.py", "def login(): return 42\n")
 	})
 
-	for _, cmd := range []string{"pytest", "pytest -q", "pytest -q --tb=short", "wc", "cat"} {
+	for _, cmd := range []string{"wc", "wc -l -q", "wc -l -q --tb=short", "wc", "cat"} {
 		d := ScopeMatch(root, recorded, current, cmd)
 		scopeCheck(t, d, false)
 		if !strings.Contains(d.Reason, "no literal path arguments") {
@@ -214,11 +214,11 @@ func TestScopeRefusesGlob(t *testing.T) {
 	})
 
 	for _, cmd := range []string{
-		"pytest tests/*.py",
-		"pytest tests/test_?.py",
-		"pytest tests/test_[ab].py",
-		"pytest tests/{a,b}.py",
-		"pytest 'tests/*.py'",
+		"wc -l tests/*.py",
+		"wc -l tests/test_?.py",
+		"wc -l tests/test_[ab].py",
+		"wc -l tests/{a,b}.py",
+		"wc -l 'tests/*.py'",
 	} {
 		d := ScopeMatch(root, recorded, current, cmd)
 		scopeCheck(t, d, false)
@@ -270,13 +270,13 @@ func TestScopeStripsPytestNodeID(t *testing.T) {
 	root, recorded, current := scopeRepo(t, seed, func(root string) {
 		scopeWrite(t, root, "src/auth.py", "def login(): return 42\n")
 	})
-	d := ScopeMatch(root, recorded, current, "pytest tests/test_x.py::test_one")
+	d := ScopeMatch(root, recorded, current, "wc -l tests/test_x.py::test_one")
 	scopeCheck(t, d, true)
 	if !scopeEqual(d.ScopePaths, []string{"tests/test_x.py"}) {
 		t.Fatalf("scope paths = %v, want [tests/test_x.py]; the node id must reduce to its file", d.ScopePaths)
 	}
 
-	d = ScopeMatch(root, recorded, current, "pytest tests/test_x.py::TestClass::test_method")
+	d = ScopeMatch(root, recorded, current, "wc -l tests/test_x.py::TestClass::test_method")
 	scopeCheck(t, d, true)
 	if !scopeEqual(d.ScopePaths, []string{"tests/test_x.py"}) {
 		t.Fatalf("scope paths = %v, want [tests/test_x.py]", d.ScopePaths)
@@ -286,7 +286,7 @@ func TestScopeStripsPytestNodeID(t *testing.T) {
 	root2, recorded2, current2 := scopeRepo(t, seed, func(root string) {
 		scopeWrite(t, root, "tests/test_x.py", "def test_one(): assert False\n")
 	})
-	scopeCheck(t, ScopeMatch(root2, recorded2, current2, "pytest tests/test_x.py::test_one"), false)
+	scopeCheck(t, ScopeMatch(root2, recorded2, current2, "wc -l tests/test_x.py::test_one"), false)
 }
 
 // A deletion is a change. diff-tree names deleted paths, which is what we want.
@@ -299,7 +299,7 @@ func TestScopeRefusesDeletedFileInScope(t *testing.T) {
 		scopeRemove(t, root, "tests/test_gone.py")
 	})
 
-	d := ScopeMatch(root, recorded, current, "pytest tests/test_gone.py")
+	d := ScopeMatch(root, recorded, current, "wc -l tests/test_gone.py")
 	scopeCheck(t, d, false)
 	if !scopeEqual(d.ChangedPaths, []string{"tests/test_gone.py"}) {
 		t.Fatalf("changed paths = %v, want the deleted file", d.ChangedPaths)
@@ -331,7 +331,7 @@ func TestScopeRefusesIdenticalTrees(t *testing.T) {
 	root := newRepo(t)
 	tree := scopeTree(t, root)
 
-	d := ScopeMatch(root, tree, tree, "pytest tests/test_billing.py")
+	d := ScopeMatch(root, tree, tree, "wc -l tests/test_billing.py")
 	scopeCheck(t, d, false)
 	if !strings.Contains(d.Reason, "identical trees") {
 		t.Fatalf("reason = %q, want the identical-trees guard", d.Reason)
@@ -353,14 +353,14 @@ func TestScopeRefusesGarbageTreeHash(t *testing.T) {
 		strings.Repeat("b", 64),
 	}
 	for _, bad := range cases {
-		scopeCheck(t, ScopeMatch(root, bad, current, "pytest tests/test_billing.py"), false)
-		scopeCheck(t, ScopeMatch(root, current, bad, "pytest tests/test_billing.py"), false)
+		scopeCheck(t, ScopeMatch(root, bad, current, "wc -l tests/test_billing.py"), false)
+		scopeCheck(t, ScopeMatch(root, current, bad, "wc -l tests/test_billing.py"), false)
 	}
 	// A root that is not a git repo at all must fail soft too.
 	scopeCheck(t, ScopeMatch(t.TempDir(), current, strings.Repeat("c", 40),
-		"pytest tests/test_billing.py"), false)
+		"wc -l tests/test_billing.py"), false)
 	scopeCheck(t, ScopeMatch("", current, strings.Repeat("c", 40),
-		"pytest tests/test_billing.py"), false)
+		"wc -l tests/test_billing.py"), false)
 }
 
 // A rename must surface both the old and the new path. With rename detection
@@ -381,7 +381,7 @@ func TestScopeSeesBothSidesOfARename(t *testing.T) {
 	mustRun(t, root, "git", "mv", "tests/test_a.py", "tests/test_b.py")
 	current := scopeTree(t, root)
 
-	scopeCheck(t, ScopeMatch(root, recorded, current, "pytest tests/test_a.py"), false)
+	scopeCheck(t, ScopeMatch(root, recorded, current, "wc -l tests/test_a.py"), false)
 }
 
 // A change to a file that configures the toolchain cannot be proven irrelevant
@@ -396,7 +396,7 @@ func TestScopeRefusesToolchainConfigChange(t *testing.T) {
 		root, recorded, current := scopeRepo(t, seed, func(root string) {
 			scopeWrite(t, root, cfg, "# changed\n")
 		})
-		d := ScopeMatch(root, recorded, current, "pytest tests/test_billing.py")
+		d := ScopeMatch(root, recorded, current, "wc -l tests/test_billing.py")
 		scopeCheck(t, d, false)
 		if !strings.Contains(d.Reason, cfg) {
 			t.Fatalf("%s: reason = %q, want it to name the config file", cfg, d.Reason)
@@ -415,7 +415,7 @@ func TestScopeRespectsQuoting(t *testing.T) {
 	root, recorded, current := scopeRepo(t, seed, func(root string) {
 		scopeWrite(t, root, "src/auth.py", "def login(): return 42\n")
 	})
-	d := ScopeMatch(root, recorded, current, `pytest "tests/test billing.py"`)
+	d := ScopeMatch(root, recorded, current, `wc -l "tests/test billing.py"`)
 	scopeCheck(t, d, true)
 	if !scopeEqual(d.ScopePaths, []string{"tests/test billing.py"}) {
 		t.Fatalf("scope paths = %v, want the quoted path intact", d.ScopePaths)
@@ -424,8 +424,8 @@ func TestScopeRespectsQuoting(t *testing.T) {
 	root2, recorded2, current2 := scopeRepo(t, seed, func(root string) {
 		scopeWrite(t, root, "tests/test billing.py", "def test_total(): assert False\n")
 	})
-	scopeCheck(t, ScopeMatch(root2, recorded2, current2, `pytest 'tests/test billing.py'`), false)
-	scopeCheck(t, ScopeMatch(root2, recorded2, current2, "pytest tests/test\\ billing.py"), false)
+	scopeCheck(t, ScopeMatch(root2, recorded2, current2, `wc -l 'tests/test billing.py'`), false)
+	scopeCheck(t, ScopeMatch(root2, recorded2, current2, "wc -l tests/test\\ billing.py"), false)
 }
 
 // The chain rule from AGENTS.md: the scope is the union of every segment, and
@@ -440,28 +440,28 @@ func TestScopeAppliesTheChainRule(t *testing.T) {
 		scopeWrite(t, root, "docs/notes.md", "goodbye\n")
 	})
 
-	d := ScopeMatch(root, recorded, current, "pytest tests/test_billing.py && ruff check src")
+	d := ScopeMatch(root, recorded, current, "wc -l tests/test_billing.py && wc -l src")
 	scopeCheck(t, d, true)
 	if !scopeEqual(d.ScopePaths, []string{"src", "tests/test_billing.py"}) {
 		t.Fatalf("scope paths = %v, want the union of both segments", d.ScopePaths)
 	}
 
 	scopeCheck(t, ScopeMatch(root, recorded, current,
-		"pytest tests/test_billing.py && git status"), false)
+		"wc -l tests/test_billing.py && git status"), false)
 
 	// A filter downstream of a pipe reads the pipe, so the pipeline stays
 	// bounded by the segment that does read the tree.
 	scopeCheck(t, ScopeMatch(root, recorded, current,
-		"pytest tests/test_billing.py | head -5"), true)
+		"wc -l tests/test_billing.py | head -5"), true)
 	scopeCheck(t, ScopeMatch(root, recorded, current,
-		"pytest tests/test_billing.py | grep -c PASS"), true)
+		"wc -l tests/test_billing.py | grep -c PASS"), true)
 
 	// But an unscoped segment anywhere reads the whole tree, and the union of
 	// the other segments' paths must not paper over it.
 	for _, cmd := range []string{
-		"pytest tests/test_billing.py; pytest",
+		"wc -l tests/test_billing.py; pytest",
 		"cat src/app.py && pytest",
-		"pytest tests/test_billing.py | python -c 'import sys'",
+		"wc -l tests/test_billing.py | python -c 'import sys'",
 		"head -5 | pytest tests/test_billing.py",
 	} {
 		scopeCheck(t, ScopeMatch(root, recorded, current, cmd), false)
@@ -480,22 +480,22 @@ func TestScopeRefusesUnresolvableArguments(t *testing.T) {
 	})
 
 	for _, cmd := range []string{
-		"pytest $DIR/test_billing.py",
-		"pytest ~/tests/test_billing.py",
-		"pytest $(ls tests)",
-		"pytest /tmp/elsewhere/test_billing.py",
-		"pytest " + filepath.Join(root, "tests", "test_billing.py"),
-		"pytest ../sibling/tests/test_billing.py",
-		"pytest tests/test_billing.py > out.txt",
-		"pytest --rootdir=tests/other tests/test_billing.py",
-		"pytest .",
+		"wc -l $DIR/test_billing.py",
+		"wc -l ~/tests/test_billing.py",
+		"wc -l $(ls tests)",
+		"wc -l /tmp/elsewhere/test_billing.py",
+		"wc -l " + filepath.Join(root, "tests", "test_billing.py"),
+		"wc -l ../sibling/tests/test_billing.py",
+		"wc -l tests/test_billing.py > out.txt",
+		"wc -l --rootdir=tests/other tests/test_billing.py",
+		"wc -l .",
 	} {
 		scopeCheck(t, ScopeMatch(root, recorded, current, cmd), false)
 	}
 
 	// 2>&1 duplicates a descriptor rather than writing a file, so it is not a
 	// redirection in the sense that matters and must not cost the hit.
-	scopeCheck(t, ScopeMatch(root, recorded, current, "pytest tests/test_billing.py 2>&1"), true)
+	scopeCheck(t, ScopeMatch(root, recorded, current, "wc -l tests/test_billing.py 2>&1"), true)
 }
 
 // Path arguments are relative to where the command ran. The frozen ScopeMatch
@@ -511,16 +511,16 @@ func TestScopeResolvesPathsAgainstTheWorkingDirectory(t *testing.T) {
 		scopeWrite(t, root, "src/auth.py", "def login(): return 42\n")
 	})
 
-	scopeCheck(t, ScopeMatchAt(root, "sub", recorded, current, "pytest tests/test_a.py"), true)
+	scopeCheck(t, ScopeMatchAt(root, "sub", recorded, current, "wc -l tests/test_a.py"), true)
 
-	d := ScopeMatch(root, recorded, current, "pytest tests/test_a.py")
+	d := ScopeMatch(root, recorded, current, "wc -l tests/test_a.py")
 	scopeCheck(t, d, false)
 	if !strings.Contains(d.Reason, "names nothing in either tree") {
 		t.Fatalf("reason = %q, want the unresolvable-path guard", d.Reason)
 	}
 
-	scopeCheck(t, ScopeMatchAt(root, "../outside", recorded, current, "pytest tests/test_a.py"), false)
-	scopeCheck(t, ScopeMatchAt(root, "/etc", recorded, current, "pytest tests/test_a.py"), false)
+	scopeCheck(t, ScopeMatchAt(root, "../outside", recorded, current, "wc -l tests/test_a.py"), false)
+	scopeCheck(t, ScopeMatchAt(root, "/etc", recorded, current, "wc -l tests/test_a.py"), false)
 }
 
 // Flags are never scoped, but they must not cost the hit either. Only a flag
@@ -536,11 +536,11 @@ func TestScopeIgnoresOrdinaryFlags(t *testing.T) {
 	})
 
 	for _, cmd := range []string{
-		"pytest -q tests/test_billing.py",
-		"pytest --tb=short -q tests/test_billing.py",
-		"pytest -x --maxfail=1 tests/test_billing.py",
-		"pytest -k not_slow tests/test_billing.py",
-		"pytest -- tests/test_billing.py",
+		"wc -l -q tests/test_billing.py",
+		"wc -l --tb=short -q tests/test_billing.py",
+		"wc -l -x --maxfail=1 tests/test_billing.py",
+		"wc -l -k not_slow tests/test_billing.py",
+		"wc -l -- tests/test_billing.py",
 	} {
 		d := ScopeMatch(root, recorded, current, cmd)
 		scopeCheck(t, d, true)
@@ -561,7 +561,7 @@ func TestScopeIgnoresPatternsButScopesDirectories(t *testing.T) {
 		scopeWrite(t, root, "docs/notes.md", "goodbye\n")
 	})
 
-	d := ScopeMatch(root, recorded, current, "grep -rn TODO src/")
+	d := ScopeMatch(root, recorded, current, "wc -l TODO src/")
 	scopeCheck(t, d, true)
 	if !scopeEqual(d.ScopePaths, []string{"src"}) {
 		t.Fatalf("scope paths = %v, want [src]; TODO is a pattern, not a path", d.ScopePaths)
@@ -579,9 +579,9 @@ func TestScopeAlwaysExplainsItself(t *testing.T) {
 	})
 
 	for _, cmd := range []string{
-		"", "   ", "pytest", "pytest tests/test_billing.py", "git status",
-		"pytest 'unterminated", "FOO=1", "FOO=1 pytest tests/test_billing.py",
-		"&& pytest", "|", "pytest tests/*.py", "./", "-q",
+		"", "   ", "wc", "wc -l tests/test_billing.py", "git status",
+		"wc -l 'unterminated", "FOO=1", "FOO=1 pytest tests/test_billing.py",
+		"&& pytest", "|", "wc -l tests/*.py", "./", "-q",
 	} {
 		d := ScopeMatch(root, recorded, current, cmd)
 		if strings.TrimSpace(d.Reason) == "" {
@@ -601,9 +601,9 @@ func TestScopeIsDeterministic(t *testing.T) {
 		scopeWrite(t, root, "src/auth.py", "def login(): return 42\n")
 	})
 
-	first := ScopeMatch(root, recorded, current, "pytest tests/test_billing.py")
+	first := ScopeMatch(root, recorded, current, "wc -l tests/test_billing.py")
 	for i := 0; i < 5; i++ {
-		got := ScopeMatch(root, recorded, current, "pytest tests/test_billing.py")
+		got := ScopeMatch(root, recorded, current, "wc -l tests/test_billing.py")
 		if got.Promoted != first.Promoted || got.Reason != first.Reason ||
 			!scopeEqual(got.ChangedPaths, first.ChangedPaths) ||
 			!scopeEqual(got.ScopePaths, first.ScopePaths) {

@@ -81,6 +81,10 @@ func ScopeMatchAt(repoRoot, cwdRel, recordedTree, currentTree, cmd string) Scope
 	if recordedTree == currentTree {
 		return ScopeDecision{Reason: "identical trees: tier 0 already decides this, tier 1 has nothing to prove"}
 	}
+	if head, ok := scopeSelfContainedHead(cmd); !ok {
+		return ScopeDecision{Reason: "reads more than its arguments: " + head +
+			" follows a dependency graph the command line does not name"}
+	}
 	if !isTreeName(recordedTree) || !isTreeName(currentTree) {
 		return ScopeDecision{Reason: "malformed tree hash: refusing to hand it to git"}
 	}
@@ -124,6 +128,70 @@ func ScopeMatchAt(repoRoot, cwdRel, recordedTree, currentTree, cmd string) Scope
 		ChangedPaths: changed,
 		ScopePaths:   scope,
 	}
+}
+
+// selfContainedReaders read their arguments and nothing else. For these, and
+// only these, "the changed paths are disjoint from the literal arguments" is a
+// proof rather than a guess.
+//
+// The list is short because the property is rare. Anything that resolves an
+// import, an include, a module graph or a config file reads paths the command
+// line never mentions.
+var selfContainedReaders = map[string]bool{
+	"cat": true, "head": true, "tail": true, "wc": true, "nl": true,
+	"md5sum": true, "shasum": true, "sha1sum": true, "sha256sum": true,
+	"cksum": true, "base64": true, "file": true, "cmp": true, "diff": true,
+}
+
+// scopeSelfContainedHead reports whether every segment of the command reads
+// only what it names.
+//
+// This is the boundary of what Tier-1 can honestly prove, and it was found by
+// a test rather than by reasoning: `pytest tests/test_billing.py` imports
+// `src/billing.py`, so a peer editing that module leaves the literal argument
+// untouched, passes the disjointness check, and gets served a stale pass for
+// code that changed. A wrong answer, not a missed hit.
+//
+// The uncomfortable consequence is that Tier-1's sound subset and its valuable
+// subset barely overlap. Commands that read only their arguments are cheap —
+// most sit below the duration floor and are not worth caching at all — while
+// the expensive commands worth caching are exactly the ones that follow
+// dependency graphs. Tier-1 is therefore close to inert in practice, by
+// design, and the honest unlock is Tier-2: read sets that are observed rather
+// than inferred from the command line.
+func scopeSelfContainedHead(cmd string) (string, bool) {
+	for _, seg := range splitSegments(cmd) {
+		if strings.TrimSpace(seg.text) == "" {
+			continue
+		}
+		toks, _, ok := tokenizeSegment(seg.text)
+		if !ok {
+			return "unparseable command", false
+		}
+		for len(toks) > 0 && isEnvAssignment(toks[0].text) {
+			toks = toks[1:]
+		}
+		if len(toks) == 0 {
+			continue
+		}
+		head := cmdBase(toks[0].text)
+		if head == "cd" {
+			continue
+		}
+		// A filter immediately downstream of a pipe reads the pipe, not the
+		// tree, so it cannot pull in a dependency the command line does not
+		// name. Same exemption the scope extractor already makes, and for the
+		// same reason.
+		// Argument count does not matter here: any path such a filter names is
+		// picked up by the scope extractor and bounds the command anyway.
+		if seg.sep == "|" && scopeStdinFilters[head] {
+			continue
+		}
+		if !selfContainedReaders[head] {
+			return head, false
+		}
+	}
+	return "", true
 }
 
 // scopeChangedPaths asks git which paths differ between two trees. Both are

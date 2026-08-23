@@ -51,7 +51,9 @@ func TestTier1PromotesThroughTheDaemon(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	const cmd = "pytest tests/test_billing.py"
+	// A reader whose read set provably is its arguments. pytest is refused
+	// by design: it follows imports the command line never names.
+	const cmd = "wc -l tests/test_billing.py"
 	blob, err := store.PutBlob([]byte("1 passed\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +113,9 @@ func TestTier1RefusesWhenTheScopedFileChanged(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	const cmd = "pytest tests/test_billing.py"
+	// A reader whose read set provably is its arguments. pytest is refused
+	// by design: it follows imports the command line never names.
+	const cmd = "wc -l tests/test_billing.py"
 	blob, _ := store.PutBlob([]byte("1 passed\n"))
 	post(t, ts.URL+"/record", &Record{
 		Agent: "a1", Key: "hs-v1:treeA", Cmd: cmd, CmdNorm: NormalizeCommand(cmd),
@@ -150,7 +154,9 @@ func TestTier1RespectsEnvironment(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	const cmd = "pytest tests/test_billing.py"
+	// A reader whose read set provably is its arguments. pytest is refused
+	// by design: it follows imports the command line never names.
+	const cmd = "wc -l tests/test_billing.py"
 	blob, _ := store.PutBlob([]byte("1 passed\n"))
 	post(t, ts.URL+"/record", &Record{
 		Agent: "a1", Key: "hs-v1:treeA", Cmd: cmd, CmdNorm: NormalizeCommand(cmd),
@@ -188,7 +194,9 @@ func TestTier1EvictionAlsoClearsCandidates(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	const cmd = "pytest tests/test_billing.py"
+	// A reader whose read set provably is its arguments. pytest is refused
+	// by design: it follows imports the command line never names.
+	const cmd = "wc -l tests/test_billing.py"
 	blob, _ := store.PutBlob([]byte("1 passed\n"))
 	post(t, ts.URL+"/record", &Record{
 		Agent: "a1", Key: "hs-v1:treeA", Cmd: cmd, CmdNorm: NormalizeCommand(cmd),

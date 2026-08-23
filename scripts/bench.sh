@@ -23,10 +23,10 @@
 #                passthrough. This is what every user pays who has not started
 #                the daemon, in exchange for nothing.
 #
-# The commands used for the hit and record paths have to clear the minimum
-# duration floor, or nothing they produce is servable and there is no hit path
-# to measure. `grep -c` over a generated data file takes about 90 ms and prints
-# one line, which clears the floor without risking output truncation.
+# The command used for the hit path has to clear the minimum duration floor, or
+# nothing it produces is servable and there is no hit path to measure. Sorting a
+# generated data file and taking the last line takes about 750 ms and prints one
+# line, which clears the floor without risking output truncation.
 #
 # Usage: bash scripts/bench.sh [--iterations N] [--large N] [--with-go]
 #
@@ -441,8 +441,15 @@ seed_fast() {
 }
 
 PASSTHROUGH_CMD="curl -s https://example.invalid/health"
-FAST_CMD="echo hindsight-bench-fast"
-HIT_CMD="grep -c payload bench-data.txt"
+# Not `echo`: the alwaysCheap list short-circuits that head with no
+# observations at all, so it would measure the wrong mechanism. `wc` has to be
+# learned by the memo, which is the path worth timing.
+FAST_CMD="wc -l .gitignore"
+# Must clear the duration floor or nothing it produces is servable and there is
+# no hit path to measure. Sorting the data file takes about 750 ms; piping to
+# tail keeps the recorded output one line, well under the 8 MB cap above which
+# a record is refused as truncated.
+HIT_CMD="sort bench-data.txt | tail -1"
 BARE_CMD="grep -cF payload bench-data.txt"
 
 # The harness surcharge, which is nobody's fault and everybody's cost.
@@ -461,6 +468,12 @@ for pair in "small:$SMALL_REPO" "large:$LARGE_REPO"; do
 	repo="${pair#*:}"
 	echo "$name repo"
 
+	# In production each repository gets its own HP_HOME and therefore its own
+	# duration memo. Here one daemon serves both fixtures, so they share one,
+	# and what the small sweep taught the memo would make the large sweep skip
+	# the very commands it is trying to time. Start each sweep clean.
+	rm -f "$HP_HOME/fastpath.json"
+
 	# The kill switch, which is the floor: spawn the binary, read one
 	# environment variable, exit.
 	export HP_ENABLE=""
@@ -472,7 +485,11 @@ for pair in "small:$SMALL_REPO" "large:$LARGE_REPO"; do
 	seed_fast "$repo" "$FAST_CMD"
 	time_hook "known-fast" "$name" "$repo" "$FAST_CMD" 0
 
-	time_hook "miss" "$name" "$repo" "echo hindsight-bench-miss" 1
+	# Not an `echo`: alwaysCheap would short-circuit it and this would measure
+	# the bail-out path twice. The hook never executes the command, so its real
+	# cost is irrelevant — only that the classifier says SERVE and the memo has
+	# never seen this exact string.
+	time_hook "miss" "$name" "$repo" "grep -rn hindsight-bench-miss src" 1
 
 	replay="$(seed_hit "$repo" "$HIT_CMD")"
 	time_hook "hit" "$name" "$repo" "$HIT_CMD" 0
@@ -482,7 +499,7 @@ for pair in "small:$SMALL_REPO" "large:$LARGE_REPO"; do
 	DEAD_PORT="$(free_port)"
 	SAVED_DAEMON="$HP_DAEMON"
 	export HP_DAEMON="http://127.0.0.1:$DEAD_PORT"
-	time_hook "daemon-down" "$name" "$repo" "echo hindsight-bench-down" 1
+	time_hook "daemon-down" "$name" "$repo" "grep -rn hindsight-bench-down src" 1
 	export HP_DAEMON="$SAVED_DAEMON"
 
 	# The other two halves of the round trip, which the hook does not pay but
@@ -566,7 +583,15 @@ FLOOR="$(awk '
 	$1 == "large" && $2 == "replay" { r = $3 }
 	END { printf("%.1f", h + r) }
 ' "$RESULTS")"
-SHIP_FLOOR="${HP_MIN_DURATION_MS:-50}"
+# Read the shipping default out of the source rather than restating it here,
+# because a benchmark that quotes a stale constant is worse than one that does
+# not mention it at all.
+SHIP_FLOOR="${HP_MIN_DURATION_MS:-}"
+if [ -z "$SHIP_FLOOR" ]; then
+	SHIP_FLOOR="$(awk '/^const DefaultMinDurationMS/ { print $NF }' \
+		"$ROOT/internal/hp/fastpath.go" 2>/dev/null)"
+fi
+[ -n "$SHIP_FLOOR" ] || SHIP_FLOOR=0
 
 echo "what SERVE-eligible commands actually cost (large repo)"
 echo "  measured floor ${FLOOR} ms (hit path + replay)   shipping floor ${SHIP_FLOOR} ms"
@@ -579,10 +604,11 @@ while IFS= read -r probe; do
 	[ -n "$policy" ] || policy="?"
 	med="$(perl "$DRIVER" shell "$LARGE_REPO" "$probe" "$ITERATIONS" </dev/null | awk '{ print $1 }')"
 	verdict="$(awk -v m="$med" -v f="$FLOOR" -v s="$SHIP_FLOOR" -v p="$policy" 'BEGIN {
-		if (p != "SERVE")   { print "not served by the classifier" }
-		else if (m < s)     { print "below both floors; memo stops it" }
-		else if (m < f)     { print "PAST THE SHIPPING FLOOR, STILL A LOSS" }
-		else                { print "worth serving" }
+		if (p != "SERVE")     { print "not served by the classifier" }
+		else if (m < s && m < f) { print "refused by the duration floor; correctly" }
+		else if (m < s)       { print "refused by the duration floor; would have paid" }
+		else if (m < f)       { print "PAST THE SHIPPING FLOOR, STILL A LOSS" }
+		else                  { print "worth serving" }
 	}')"
 	printf '  %-32s %-11s %9s   %s\n' "$probe" "$policy" "$med" "$verdict"
 done <<'PROBES'
@@ -597,8 +623,10 @@ git status --porcelain
 git log --oneline -20
 git diff --stat HEAD
 find src -name file00001.go
-grep -rn Fixture07 src
 grep -c payload bench-data.txt
+find src -type f
+grep -rl Fixture00 src
+grep -rn Fixture07 src
 sort bench-data.txt
 PROBES
 echo
