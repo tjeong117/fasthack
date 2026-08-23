@@ -194,6 +194,11 @@ execution to decide whether the result was servable at all.
 | Payload parse + response encode | 0.0024 ms | `HookEnvelope` |
 | **Total** | **34.86 ms** | |
 
+The four rows costing more than a millisecond come from the `10x -count 5`
+sweep; the sub-millisecond rows come from the microbenchmark sweep, because ten
+iterations of a one-microsecond function measures the timer rather than the
+function.
+
 Measured end-to-end for the same case: **42.01 ms median, 34.33 ms minimum**.
 The decomposition accounts for essentially all of the best case; the 7.7 ms
 between minimum and median is host noise.
@@ -288,9 +293,10 @@ below.
 
 ### Does the arithmetic support `DefaultMinDurationMS = 500`?
 
-Partly. The *existence* of a floor is strongly supported. The *value* is not
-derivable from these numbers, and the justification recorded beside it in
-`internal/hp/fastpath.go` has three problems.
+Partly. The *existence* of a floor is strongly supported, and 500 ms is inside
+the range these numbers permit. But it is not what the arithmetic produces, and
+the justification recorded beside it in `internal/hp/fastpath.go` has four
+problems.
 
 **The stated derivation omits its largest term.** The comment computes
 `hit_rate × duration > 42 ms` and concludes that 5.4% reuse needs a command of
