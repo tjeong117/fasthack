@@ -1,0 +1,14 @@
+# built binary
+/hindsight
+*.test
+
+# local cache home, if anyone overrides HP_HOME into the tree (they shouldn't)
+/.hindsight/
+
+# fleet scratch
+/.fleet/
+/worktrees/
+
+__pycache__/
+*.pyc
+.DS_Store

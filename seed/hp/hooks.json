@@ -1,0 +1,31 @@
+{
+  "description": "Hindsight: shared execution cache for parallel Codex agents",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env python3 /abs/path/to/hp/hp_pre.py",
+            "timeout": 5,
+            "statusMessage": "hindsight: checking cache"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env python3 /abs/path/to/hp/hp_post.py",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

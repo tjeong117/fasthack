@@ -1,0 +1,284 @@
+<title>Hindsight Run Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+:root{
+  --paper:#F4F7F6; --card:#FFFFFF; --ink:#111A1C; --ink-soft:#3C4B4E; --muted:#63747A;
+  --rule:#D8E2DF; --rule-soft:#E7EDEB; --accent:#0E6E5C; --accent-wash:#E2F0EB;
+  --fail:#A8402F; --fail-wash:#F7E6E2; --warn:#8A6114; --warn-wash:#F6EDD9;
+  --shadow:0 1px 2px rgba(17,26,28,.06),0 8px 24px -12px rgba(17,26,28,.18);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0D1214; --card:#141C1E; --ink:#E8EFED; --ink-soft:#B4C3C1; --muted:#7E9092;
+    --rule:#263336; --rule-soft:#1C2628; --accent:#4FCBAA; --accent-wash:#12312B;
+    --fail:#E98A75; --fail-wash:#33201C; --warn:#D6A94E; --warn-wash:#2E2513;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0D1214; --card:#141C1E; --ink:#E8EFED; --ink-soft:#B4C3C1; --muted:#7E9092;
+  --rule:#263336; --rule-soft:#1C2628; --accent:#4FCBAA; --accent-wash:#12312B;
+  --fail:#E98A75; --fail-wash:#33201C; --warn:#D6A94E; --warn-wash:#2E2513;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:"Source Serif 4",Georgia,serif;
+  font-size:17px;line-height:1.62;margin:0;padding:0 20px 96px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:840px;margin:0 auto}
+.mast{padding:56px 0 28px;border-bottom:2px solid var(--ink)}
+.eyebrow{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 18px;
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.eyebrow .dot{color:var(--muted);font-weight:400}
+h1{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-weight:700;
+  font-size:clamp(38px,7vw,60px);line-height:1.02;letter-spacing:-.028em;margin:0 0 16px;text-wrap:balance}
+.standfirst{font-size:20px;line-height:1.5;color:var(--ink-soft);margin:0;max-width:62ch}
+.standfirst strong{color:var(--ink);font-weight:600}
+h2{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-weight:700;font-size:clamp(23px,3.4vw,29px);
+  line-height:1.15;letter-spacing:-.018em;margin:0 0 6px;text-wrap:balance}
+h3{font-family:Archivo,"Helvetica Neue",Arial,sans-serif;font-weight:600;font-size:17px;
+  letter-spacing:-.005em;margin:0 0 8px}
+section{padding:44px 0;border-bottom:1px solid var(--rule-soft)}
+section:last-of-type{border-bottom:0}
+.kicker{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--muted);font-weight:500;margin:0 0 14px}
+p{margin:0 0 16px;max-width:66ch}
+p:last-child{margin-bottom:0}
+strong{font-weight:600}
+code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.85em;background:var(--rule-soft);
+  padding:.14em .38em;border-radius:3px;color:var(--ink);overflow-wrap:anywhere}
+a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:2px}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+.verdict{background:var(--card);border:1px solid var(--rule);border-left:4px solid var(--accent);
+  border-radius:3px;padding:26px 28px;box-shadow:var(--shadow);margin:0 0 8px}
+.verdict .line{font-family:Archivo,sans-serif;font-weight:600;font-size:21px;line-height:1.35;
+  letter-spacing:-.012em;margin:0 0 12px;text-wrap:balance}
+.verdict p{font-size:16.5px;color:var(--ink-soft);margin-bottom:12px}
+.correction{background:var(--warn-wash);border:1px solid var(--rule);border-radius:3px;
+  padding:18px 20px;margin:0 0 14px}
+.correction .tag{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.12em;
+  text-transform:uppercase;font-weight:700;color:var(--warn);display:block;margin-bottom:8px}
+.correction p{font-size:16px;margin-bottom:10px;color:var(--ink)}
+.tablewrap{overflow-x:auto;margin:0 0 14px;border:1px solid var(--rule);border-radius:3px;background:var(--card)}
+table{border-collapse:collapse;width:100%;min-width:520px;font-family:"JetBrains Mono",monospace;font-size:13px}
+th{text-align:left;font-weight:700;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);padding:12px 16px;border-bottom:1px solid var(--rule);white-space:nowrap}
+td{padding:11px 16px;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.big{font-weight:700;font-size:15px;color:var(--accent)}
+.dim{color:var(--muted)}
+tr.hero td{background:var(--accent-wash)}
+tr.danger td{background:var(--fail-wash)}
+.run{list-style:none;margin:0;padding:0}
+.run li{display:grid;grid-template-columns:96px 1fr;gap:20px;padding:16px 0;border-top:1px solid var(--rule-soft)}
+.run li:first-child{border-top:1px solid var(--rule)}
+.clock{font-family:"JetBrains Mono",monospace;font-size:12.5px;font-weight:700;color:var(--accent);
+  letter-spacing:-.01em;padding-top:3px;font-variant-numeric:tabular-nums}
+.run .task{margin:0}
+.run .task b{font-family:Archivo,sans-serif;font-weight:600;font-size:16px;display:block;
+  margin-bottom:4px;color:var(--ink)}
+.run .task span{font-size:15.5px;color:var(--ink-soft);display:block;max-width:60ch}
+.cutline{display:flex;align-items:center;gap:14px;margin:22px 0;font-family:"JetBrains Mono",monospace;
+  font-size:11px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--fail)}
+.cutline::before,.cutline::after{content:"";flex:1;height:0;border-top:2px dashed var(--fail);opacity:.65}
+.script{background:var(--card);border:1px solid var(--rule);border-radius:3px;padding:26px 28px;box-shadow:var(--shadow)}
+.script p{font-size:18px;line-height:1.58;margin-bottom:15px;color:var(--ink);max-width:58ch}
+.script p:last-child{margin-bottom:0}
+.script .beat{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--accent);font-weight:700;display:block;margin-bottom:3px}
+.banned{background:var(--fail-wash);border:1px solid var(--rule);border-radius:3px;padding:20px 22px}
+.banned ul{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:8px}
+.banned li{font-family:"JetBrains Mono",monospace;font-size:13px;font-weight:500;background:var(--card);
+  border:1px solid var(--rule);color:var(--fail);padding:5px 11px;border-radius:2px;
+  text-decoration:line-through;text-decoration-thickness:1.5px}
+.risks{list-style:none;margin:0;padding:0}
+.risks li{padding:14px 0 14px 22px;border-top:1px solid var(--rule-soft);position:relative;
+  font-size:16px;color:var(--ink-soft);max-width:66ch}
+.risks li:first-child{border-top:0}
+.risks li::before{content:"";position:absolute;left:0;top:22px;width:9px;height:2px;background:var(--fail)}
+.risks li b{color:var(--ink);font-weight:600}
+.note{font-size:14.5px;color:var(--muted);border-left:2px solid var(--rule);padding-left:16px;
+  margin:18px 0 0;max-width:64ch}
+.say{font-family:Archivo,sans-serif;font-size:17px;font-weight:500;line-height:1.45;
+  background:var(--accent-wash);border-radius:3px;padding:16px 18px;color:var(--ink);margin:14px 0 0;max-width:62ch}
+pre{background:var(--card);border:1px solid var(--rule);border-radius:3px;padding:16px 18px;
+  overflow-x:auto;font-family:"JetBrains Mono",monospace;font-size:13px;line-height:1.55;margin:0 0 16px}
+pre code{background:none;padding:0;font-size:inherit}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (max-width:560px){body{font-size:16px}.run li{grid-template-columns:1fr;gap:5px}.clock{padding-top:0}}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Fast Hackathon <span class="dot">/</span> YC SF <span class="dot">/</span> 23 Aug 2026 <span class="dot">/</span> rev 2</p>
+  <h1>Hindsight</h1>
+  <p class="standfirst">N coding agents, N sandboxes, but every command that <strong>every agent runs identically</strong> executes exactly once across the fleet — keyed on git's own Merkle hash of the live workspace, served as a verified replay. Not a prediction. A receipt.</p>
+</header>
+
+<section>
+  <p class="kicker">Revision — the sweep changed the target</p>
+  <div class="verdict">
+    <p class="line">Same product, but aim it at the cold start, not at general state sharing.</p>
+    <p>Rev 1 told you the value was in skipping <em>expensive</em> execution — test suites, builds. I re-measured against <code>sealed-corpus/replay-A</code> (25 SWE-bench tasks, each attempted by 3–26 independent agents, 11,687 commands) and that framing is wrong in a specific, fixable way.</p>
+    <p><strong>The first expensive command lands at median step 18</strong> — long after agents have diverged. By the time anyone runs <code>pytest</code>, the trees differ, because the agent's own edit is what makes it a different agent. Its pre-verification state is unique by construction.</p>
+    <p>But overlap is real and it is <strong>front-loaded</strong>, which is the thing to build on.</p>
+  </div>
+</section>
+
+<section>
+  <p class="kicker">Receipts — replay-A, re-measured today</p>
+  <h2>Overlap decays as agents diverge</h2>
+  <p>25 tasks with ≥2 agents (fan-out widths 3, 4, 5, 6, 9, 10, 26). Cross-agent command overlap, held-out per agent:</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Window</th><th class="num">Overlap</th><th class="num">n</th></tr></thead>
+      <tbody>
+        <tr><td>First command only</td><td class="num">17.7%</td><td class="num dim">243</td></tr>
+        <tr class="hero"><td><strong>First 3 commands</strong></td><td class="num big">26.5%</td><td class="num dim">729</td></tr>
+        <tr><td>First 5 commands</td><td class="num">24.3%</td><td class="num dim">1,211</td></tr>
+        <tr><td>First 10 commands</td><td class="num">19.2%</td><td class="num dim">2,359</td></tr>
+        <tr class="danger"><td>After step 10</td><td class="num">11.0%</td><td class="num dim">9,422</td></tr>
+        <tr><td>All commands</td><td class="num">13.7%</td><td class="num dim">11,687</td></tr>
+        <tr><td>Expensive commands only</td><td class="num">10.4%</td><td class="num dim">509</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note"><strong>26.5% → 11.0%.</strong> That gradient is the whole product. Agents start identical and diverge monotonically. Everything worth caching happens before step 10.</p>
+
+  <div class="correction" style="margin-top:24px">
+    <span class="tag">Where I disagree with my own sub-agent — say the right version</span>
+    <p>One sweep reported <strong>zero</strong> cross-agent hits on expensive commands. I get <strong>10.4% (53/509)</strong>. The difference is the key: that sweep matched on <code>(tree state, command)</code>; I matched on <strong>command only</strong>. Both are true and the gap between them is the honest finding — <em>command-level</em> overlap on expensive work is ~10%, but <em>state-matched</em> overlap is ~0, because trees have already diverged by step 18.</p>
+    <p>This also corrects rev 1's 23.9% figure: that measurement was <strong>state-free</strong> too. It is a real number for read-only probes, where state-insensitivity is defensible. It is not a licence to cache a test run. Never serve a mutating or expensive command on a command-only key.</p>
+  </div>
+
+  <div class="correction">
+    <span class="tag">A limitation to volunteer before anyone finds it</span>
+    <p>This corpus starts from a <strong>pre-built container</strong>. It contains no <code>uv sync</code>, no <code>pip install</code>, no image build — so it cannot measure the setup convoy, in either direction. The structural claim that five worktrees all run the same install at a byte-identical HEAD is sound reasoning, not a measured result here. Say that on stage. It costs you nothing and it is exactly the kind of thing a YC judge tests for.</p>
+  </div>
+</section>
+
+<section>
+  <p class="kicker">The mechanism — verified live, this session</p>
+  <h2>git already computes the hash you couldn't design</h2>
+  <p><code>lucid-thoughts.md</code> asks for a key where "hash a is comparable to hash b the same way state a and b are." A side-index <code>write-tree</code> gives you the exact-match half of that for free:</p>
+  <pre><code># NOT this — a throwaway index re-stats every file, 220ms warm / 580ms cold
+# SIDE=$(mktemp -u)
+
+# This — a PERSISTENT side index, pre-warmed once per worktree
+SIDE=.git/hp-index
+GIT_INDEX_FILE=$SIDE git add -A
+GIT_INDEX_FILE=$SIDE git write-tree   # → 4cf8231d1600273ab5…</code></pre>
+  <p>I ran it twice on your skunk-works checkout: <strong>identical hash both times</strong>, and <code>git status</code> confirms the real index is untouched (<code>M index.html</code>, <code>M technical-report.html</code> still staged as they were). It is a true Merkle hash of the live workspace and it returns the same value when a workspace revisits a prior state.</p>
+  <div class="correction">
+    <span class="tag">Timing correction — rev 1 said ~10–40 ms</span>
+    <p>That figure only holds for a <strong>persistent, warm</strong> index. Measured on skunk-works just now: throwaway <code>mktemp</code> index <strong>580 ms cold / 220 ms warm</strong>; persistent <code>.git/hp-index</code> <strong>220 ms cold / 20–30 ms warm</strong>. On an 11k-file repo the throwaway version was measured at <strong>1250–1740 ms</strong> — a visible hang in the hook path. Use the persistent index, and pre-warm it on <em>every</em> worktree during setup, not just the presenting one.</p>
+  </div>
+  <p>Claude Code's <code>PreToolUse</code> hook returns <code>updatedInput</code>, so a hit rewrites the command into <code>cat /tmp/hp/&lt;key&gt;</code> and the model receives a clean, non-error tool result in about a millisecond. That is the entire integration surface.</p>
+</section>
+
+<section>
+  <p class="kicker">Your best slide is a negative result</p>
+  <h2>The isomorphic hash is ill-posed — and you can prove it</h2>
+  <p>You've been stuck on making hashes comparable the way states are. That object <strong>cannot exist as one artifact</strong>: comparability requires a lossy projection, cache-safety requires injectivity, and the two are opposed. On your own numstat representation, three trees containing <code>x = 99</code>, <code>x = -7</code>, and <code>import os; os.system("rm -rf /")</code> all hash to the same <code>state_sha256</code>.</p>
+  <p>The "just use embeddings" fix is self-refuting: a key loose enough to make agent-1's edit collide with agent-2's edit then serves agent-2 a test result produced by <em>different code</em> — and telling those two edits apart is the entire reason the suite is running. You already measured this from the other side: ρ(surface similarity, |outcome gap|) = <strong>−0.252, p = 8.3e-77</strong>.</p>
+  <p>So: exact Merkle key for serving, similarity only for advisory notes. Present the impossibility as a finding, not a gap. It is the most senior thing you can say on stage.</p>
+</section>
+
+<section>
+  <p class="kicker">Nobody ships this</p>
+  <p>Conductor, Vibe Kanban, Claude Squad, Crystal, Emdash, Baton, Paseo — every parallel-agent tool <strong>isolates</strong> agents. Zero npm or pip packages memoize agent tool calls across agents. The fan-out orchestration layer exists and is crowded; the shared-execution layer underneath it is empty.</p>
+  <p>Your own repo has the one validated instance of the thesis: <code>ONEIROLOGY_MODEL.md:158-161</code> — two agent instances on different hosts, knowledge passed through a written artifact (<code>INHERITED_FINDINGS.md</code>), and the second agent did not repeat the first's dead ends. The mechanism was a markdown file, not a hash. That both proves the value and suggests the hard part you've been stuck on may be unnecessary.</p>
+</section>
+
+<section>
+  <p class="kicker">Two people</p>
+  <h2>Split by file, not by feature</h2>
+  <p>The serve path is one thought, ~150 lines. Handing part of it to a second person buys 40 minutes and costs an integration join right before the hard checkpoint. Don't make that trade. <strong>Zero files appear in both columns — that is the whole merge protocol.</strong></p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Person 1 — the serve path</th><th>Person 2 — producer &amp; evidence</th></tr></thead>
+      <tbody>
+        <tr><td><code>hp/state.py</code><br><code>hp/store.py</code><br><code>hp/daemon.py</code><br><code>hp/hooks/hp_pre.py</code><br><code>hp/hooks/hp_post.py</code><br><code>.claude/settings.json</code></td>
+            <td><code>hp/schema.py</code> ← the contract<br><code>hp/policy.py</code> (deny-list)<br><code>hp/clone.py</code> (artifact guard)<br><code>fleet.py</code><br><code>tools/verify.py</code><br><code>viewer.html</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><strong><code>hp_pre.py</code> has exactly one owner.</strong> It is the file that decides whether to substitute execution — two authors editing it near a deadline is how a deny-list entry silently disappears.</p>
+  <p class="note">Freeze <code>hp/schema.py</code> in writing at H+0, before either person writes code. P1 imports it and never edits it; if P1 needs a change, P1 asks out loud. Daemon URL comes from <code>HP_DAEMON</code>, default <code>http://127.0.0.1:7777</code> — put that in at H+0, because that env var <em>is</em> the entire cross-machine feature.</p>
+</section>
+
+<section>
+  <p class="kicker">Run sheet</p>
+  <h2>Seven hours, one checkpoint that can kill the demo</h2>
+  <p>Two order changes now that there are two of you: <strong>move the hook spike to minute 5</strong> (it is the only genuinely unverified thing in the build — prove <code>updatedInput</code> can rewrite a Bash command with no permission prompt before anything else), and <strong>move the artifact guard before the checkpoint</strong>, since it has zero dependency on P1 and anything scheduled after a hard checkpoint gets cut when the checkpoint runs long.</p>
+  <ol class="run">
+    <li><span class="clock">H+0.0</span><p class="task"><b>Fleet harness first. No UI.</b><span>5 <code>git worktree</code> sandboxes on one repo whose deps take 20–60s and whose suite takes 40–90s. <code>fleet.py</code>, ~20 lines. Get five Claude Code agents running the same bug in parallel and log every command with its duration.</span></p></li>
+    <li><span class="clock">H+1.0</span><p class="task"><b><code>hp/state.py</code> + <code>hp/daemon.py</code>.</b><span>Tree hash via side-index <code>write-tree</code> (verified above). Daemon = <code>http.server</code> + SQLite WAL, <code>POST /lookup</code>, <code>POST /record</code>, <code>GET /events</code> SSE. Key = <code>(tree_sha, cmd_norm)</code>. Store <code>{rc, stdout, duration_s, agent_id, step}</code>.</span></p></li>
+    <li><span class="clock">H+2.0</span><p class="task"><b>The two hooks.</b><span><code>hp_pre.py</code>: look up; on hit return <code>updatedInput</code> rewriting to <code>cat /tmp/hp/&lt;key&gt;</code>. <code>hp_post.py</code>: record. Deny-list is non-negotiable and goes in now — never serve <code>date|time|sleep|curl|wget|ping|ssh|git push|git pull|git fetch|uuidgen|$RANDOM</code> or anything writing outside the repo root. <strong>Default is EXECUTE.</strong></span></p></li>
+  </ol>
+
+  <p class="cutline">Checkpoint — H+3.0 — measure hit rate before any UI</p>
+  <p style="margin-top:-4px">Run the real five-agent fleet and count hits. <strong>If it's zero, you need that answer at hour three, not hour eight.</strong> Fallback if zero: drop to replay mode — drive the viewer from <code>replay-A</code> records, label it "replayed from 25 recorded fan-outs," and pitch the 26.5% → 11.0% decay curve as the finding. That is still a real demo with real numbers.</p>
+
+  <ol class="run" style="margin-top:22px">
+    <li><span class="clock">H+3.5</span><p class="task"><b>The artifact guard. 45 minutes. Do not skip.</b><span>For install-class commands, cache the <strong>artifact, not the transcript</strong>. <code>hp_post.py</code> snapshots the produced directory; a hit does <code>cp -c -R .venv &lt;target&gt;</code> — APFS copy-on-write, ~0.4s for 3,000 files against a 40s install — <em>then</em> returns the recorded stdout. Rehearse it by deleting <code>.venv</code> in a fresh worktree, taking the hit, and running pytest for real.</span></p></li>
+    <li><span class="clock">H+4.5</span><p class="task"><b><code>viewer.html</code> — two clocks and a counter.</b><span>Left: baseline fleet. Right: Hindsight fleet. Both live. Bottom: <strong>execution-seconds deleted</strong>, ticking — the sum of the <em>original measured duration</em> of every served hit. Every served result shows its provenance stamp inline.</span></p></li>
+    <li><span class="clock">H+5.5</span><p class="task"><b>Shadow verify + the VERIFY button.</b><span>Re-execute served hits in the background, byte-diff against what was served, print a loud <code>CACHE_MISMATCH</code> on divergence, keep a running counter on screen: "served 31 / verified 31 / 0 divergent." This counter is the pitch.</span></p></li>
+    <li><span class="clock">H+6.0</span><p class="task"><b>Rehearse aloud, timed, five times.</b><span>Pre-warm both sides of the race — deps, images — so the baseline is provably fair, and say so out loud. Record a clean run as video fallback. Cut any sentence without a number or a noun in it.</span></p></li>
+  </ol>
+</section>
+
+<section>
+  <p class="kicker">Sixty seconds</p>
+  <div class="script">
+    <p><span class="beat">Problem</span>Five agents on one bug, five sandboxes. They all install the same dependencies. They all run the same failing test to reproduce it. They all read the same six files. You pay five times for one piece of information, every single time.</p>
+    <p><span class="beat">What it is</span>This is Hindsight. Every command is keyed on git's own hash of the workspace. If a peer already ran it at the same tree, you get their recorded result back instead of running it.</p>
+    <p><span class="beat">Demo</span>Left, five agents, no sharing. Right, same five, same bug, sharing. Watch the bottom counter — that's execution-seconds deleted. Not saved. Deleted. Work that was paid for once and provably not paid for again.</p>
+    <p><span class="beat">The guarantee</span>Every served result is a verified replay of a real execution, and I re-run all of them in the background to check. Thirty-one served, thirty-one verified, zero divergent. There's no model here. Nothing is predicted.</p>
+    <p><span class="beat">The finding</span>Across twenty-five SWE-bench tasks with up to twenty-six agents each, overlap is twenty-six percent in the first three commands and eleven percent after step ten. Agents start identical and diverge. Everything worth sharing happens early.</p>
+    <p><span class="beat">Why believe you</span>I built a world model for this first. I gated it, four of six heads failed, and I killed a three-hundred-and-forty-dollar experiment for eighteen. The cache is what survived.</p>
+  </div>
+</section>
+
+<section>
+  <p class="kicker">The honesty rule</p>
+  <h2>Subtraction, not speedup</h2>
+  <p>Your standing order at <code>DIRECTIONS.md:191</code> is <em>"NEVER: race wall-clock incumbents."</em> The way to obey it and still show a clock: <strong>don't claim a speedup, claim a deletion.</strong> Execution-seconds deleted is arithmetic over measured durations, not a benchmark — it is the sum of real times that were really spent and really not spent again. Nobody can argue with a subtraction.</p>
+  <p>Show n=1 live as illustration and a pre-recorded n=5 as the evidence, and say out loud which is which.</p>
+  <div class="banned" style="margin-top:22px">
+    <h3 style="margin-bottom:12px;color:var(--fail)">Banned phrases — write them on your hand</h3>
+    <ul>
+      <li>Nx faster</li><li>% speedup</li><li>prevents mistakes</li><li>predicts what will happen</li><li>turn your codebase into a world model</li><li>your number + their 80%</li>
+    </ul>
+    <p style="margin-top:14px;font-size:15px;color:var(--ink)">“Turn your codebase into a WM” is the worst available sentence: you get the Experiential collision <em>without</em> the greenfield, arriving late to a lane the incumbent already left. Cut it entirely.</p>
+  </div>
+</section>
+
+<section>
+  <p class="kicker">Experiential Labs</p>
+  <h2>They already left. Name them once, only if asked.</h2>
+  <p>Their June post was "turn your agent's traces into a world model." Today <code>experientiallabs.ai</code> reads <strong>"The open source AI gateway,"</strong> and the phrase "world model" appears zero times on it. Both <code>world-model-harness</code> and <code>world-model-optimizer</code> 301-redirect into <code>experientiallabs/experiential</code>. A Waabi simulator lead and the AutoGPT founder market-tested trace→WM-as-a-product for two months and moved to selling routing and cost.</p>
+  <p>Don't build on them either: <code>pip install experiential</code> v0.5.2 hit PyPI about eighteen hours ago, the CLI every tutorial references no longer exists, first run is a wizard demanding provider keys and a $50 budget, and it pulls a compiled Rust dependency. If you demo on their harness, the strongest thing on screen is theirs.</p>
+  <p>Two facts that are genuinely useful: their shipped state encoder is <code>signed-blake2b-token-hashing</code>, a 256-dim bag-of-tokens hash — literally the "direct text hashing" your note rejects. And their RAG key is <code>{task, initial_context, action}</code> with <strong>no state field at all</strong>, plus an <code>excluded_lineage_ids</code> guard that explicitly <em>forbids</em> cross-trajectory retrieval. Their architecture cannot express what you're building.</p>
+  <p class="say">“Experiential builds a world model from production telemetry — and as of this week they're selling a gateway instead. I'm not predicting anything. I replay real executions, keyed on git's own tree hash, and I byte-verify every one on stage.”</p>
+</section>
+
+<section>
+  <p class="kicker">Risks, ranked</p>
+  <ul class="risks">
+    <li><b>THE GITIGNORE HOLE — the only thing that can make Hindsight <em>wrong</em> rather than silent.</b> <code>git add -A</code> respects <code>.gitignore</code>, so <code>.venv</code> is not in the tree. <strong>Verified: two checkouts with different <code>.venv</code> contents produce an identical tree hash.</strong> That falsifies "never wrong when it answers" — the entire pitch. Fix before anything else touches the daemon: fold an environment fingerprint into the key — <code>sha256(python -V, uname -m, hash of lockfile / pip freeze)</code>. This goes from theoretical to probable the moment a second laptop joins, because two machines genuinely do have different dependency state. If you skip exactly one item on this page, it must not be this one.</li>
+    <li><b>You serve cached <code>uv sync</code> stdout and agent-2 has no <code>.venv</code>.</b> The next <code>pytest</code> explodes with ModuleNotFoundError, live, and the whole thing reads as theater. Most likely on-stage death, because install commands are your best hit and the naive build caches only text. Guard: the H+3.5 artifact clone. Non-negotiable.</li>
+    <li><b>Hit rate is zero on the live fleet.</b> Guard: the H+3.0 checkpoint, before any UI, with the replay-mode fallback ready.</li>
+    <li><b>Greptile hosts this, and their public line is “agents should just run the code.”</b> You agree — you never replace execution, you replay a peer's and verify it. Have the sentence ready: <em>“I agree, run the code. I'm telling agent five what happened when agent two already ran it.”</em></li>
+    <li><b>“Shouldn't you diversify agents instead of duplicating them?”</b> The sharpest question you'll get, and your own five-agent research run backs the challenger: 150 arXiv works across 6 reports, 7 shared — redundancy 1.06×. Answer: diversified agents share nothing by design, and best-of-N on one task is not diversification, it's a race. Hindsight pays in the race, not in the survey.</li>
+    <li><b>A cached read is still an LLM turn.</b> Returning a cached grep saves the exec, not the turn. Say “execution-seconds,” never “turns,” unless you inject proactively into context.</li>
+    <li><b>Don't bolt the old demo on for visual weight.</b> <code>stage0a-rerun-report.json</code> shows <code>any_named_path_movement</code> at 0.9496 where the always-none constant also scores 0.9496. Hindsight containing no model is the cleanest defence you have.</li>
+  </ul>
+</section>
+
+</div>
