@@ -1,0 +1,22 @@
+# Commands every agent runs, in order. This drives the deterministic arm.
+#
+# Two hard rules, both learned the hard way:
+#
+#   1. Every command must take MORE than 500 ms. That is the duration floor in
+#      internal/hp/fastpath.go, below which a record is marked unservable and
+#      the fastpath memo eventually stops intercepting the command entirely.
+#      A demo built on `ls` or `git status` shows literally nothing.
+#
+#   2. Every command must leave the tree byte-identical. The purity gate
+#      compares the tree hash and the dependency fingerprint before and after.
+#      `-p no:cacheprovider` is why pytest qualifies: without it pytest writes
+#      .pytest_cache/, which sympy does not gitignore, which dirties the tree
+#      and makes every record unservable.
+#
+# `python -m pytest` rather than `pytest`, because -m puts the current
+# directory first on sys.path, so each worktree tests its own source rather
+# than whatever the shared venv installed.
+
+python -m pytest -q -p no:cacheprovider sympy/core/tests/test_expr.py
+python -m pytest -q -p no:cacheprovider sympy/core/tests/test_arit.py
+python -m pytest -q -p no:cacheprovider sympy/core/tests/test_numbers.py

@@ -1,0 +1,62 @@
+{
+  "agents": 5,
+  "counterfactual_ms": 44460,
+  "deleted_ms": 35568,
+  "demand": 15,
+  "executed": 3,
+  "executed_ms": 8892,
+  "fleet_wall_ms": 9858,
+  "hit_rate_pct": 80.0,
+  "lease_waits": 12,
+  "log": "/tmp/hs-demo-cached-20260823-154831/log.jsonl",
+  "mode": "cached",
+  "per_agent": {
+    "a1": {
+      "deleted_ms": 6333,
+      "exec": 1,
+      "exec_ms": 2559,
+      "hit": 0,
+      "wait": 2
+    },
+    "a2": {
+      "deleted_ms": 8892,
+      "exec": 0,
+      "exec_ms": 0,
+      "hit": 0,
+      "wait": 3
+    },
+    "a3": {
+      "deleted_ms": 2559,
+      "exec": 2,
+      "exec_ms": 6333,
+      "hit": 0,
+      "wait": 1
+    },
+    "a4": {
+      "deleted_ms": 8892,
+      "exec": 0,
+      "exec_ms": 0,
+      "hit": 0,
+      "wait": 3
+    },
+    "a5": {
+      "deleted_ms": 8892,
+      "exec": 0,
+      "exec_ms": 0,
+      "hit": 0,
+      "wait": 3
+    },
+    "verifier": {
+      "deleted_ms": 0,
+      "exec": 0,
+      "exec_ms": 0,
+      "hit": 0,
+      "wait": 0
+    }
+  },
+  "scope": "this run",
+  "served": 12,
+  "verified_false": 0,
+  "verified_true": 0,
+  "wait_ms": 35568
+}

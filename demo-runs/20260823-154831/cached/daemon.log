@@ -1,0 +1,10 @@
+hindsight daemon on http://127.0.0.1:7777  cache=/tmp/hs-demo-cached-20260823-154831
+2026/08/23 15:48:56 hindsight: CACHE_MISMATCH key=hs-v1:bc9a1ebe137cc8c5c7d272ee0b712183bf33d67fc203de970eb2b292dd8a8851 stdout diverged after normalization
+2026/08/23 15:48:56 hindsight: CACHE_MISMATCH key=hs-v1:bc9a1ebe137cc8c5c7d272ee0b712183bf33d67fc203de970eb2b292dd8a8851 stdout diverged after normalization
+2026/08/23 15:48:57 hindsight: CACHE_MISMATCH key=hs-v1:bc9a1ebe137cc8c5c7d272ee0b712183bf33d67fc203de970eb2b292dd8a8851 stdout diverged after normalization
+2026/08/23 15:48:57 hindsight: CACHE_MISMATCH key=hs-v1:bc9a1ebe137cc8c5c7d272ee0b712183bf33d67fc203de970eb2b292dd8a8851 stdout diverged after normalization
+2026/08/23 15:48:57 hindsight: CACHE_MISMATCH key=hs-v1:e1e7d7fb5ca7fa35d701c457402298ed75d816cad57a04c49d7a09282b17e426 stdout diverged after normalization
+2026/08/23 15:48:57 hindsight: CACHE_MISMATCH key=hs-v1:e1e7d7fb5ca7fa35d701c457402298ed75d816cad57a04c49d7a09282b17e426 stdout diverged after normalization
+2026/08/23 15:48:57 hindsight: CACHE_MISMATCH key=hs-v1:e1e7d7fb5ca7fa35d701c457402298ed75d816cad57a04c49d7a09282b17e426 stdout diverged after normalization
+2026/08/23 15:48:57 hindsight: CACHE_MISMATCH key=hs-v1:e1e7d7fb5ca7fa35d701c457402298ed75d816cad57a04c49d7a09282b17e426 stdout diverged after normalization
+2026/08/23 15:49:01 hindsight: CACHE_MISMATCH key=hs-v1:e1e7d7fb5ca7fa35d701c457402298ed75d816cad57a04c49d7a09282b17e426 stdout diverged after normalization
