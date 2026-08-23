@@ -1,0 +1,55 @@
+{
+  "agents": 5,
+  "counterfactual_ms": 40518,
+  "deleted_ms": 0,
+  "demand": 15,
+  "executed": 15,
+  "executed_ms": 40518,
+  "fleet_wall_ms": 8854,
+  "hit_rate_pct": 0.0,
+  "lease_waits": 0,
+  "log": "/tmp/hs-demo-baseline-20260823-154831/log.jsonl",
+  "mode": "baseline",
+  "per_agent": {
+    "a1": {
+      "deleted_ms": 0,
+      "exec": 3,
+      "exec_ms": 8097,
+      "hit": 0,
+      "wait": 0
+    },
+    "a2": {
+      "deleted_ms": 0,
+      "exec": 3,
+      "exec_ms": 8139,
+      "hit": 0,
+      "wait": 0
+    },
+    "a3": {
+      "deleted_ms": 0,
+      "exec": 3,
+      "exec_ms": 8108,
+      "hit": 0,
+      "wait": 0
+    },
+    "a4": {
+      "deleted_ms": 0,
+      "exec": 3,
+      "exec_ms": 8037,
+      "hit": 0,
+      "wait": 0
+    },
+    "a5": {
+      "deleted_ms": 0,
+      "exec": 3,
+      "exec_ms": 8137,
+      "hit": 0,
+      "wait": 0
+    }
+  },
+  "scope": "this run",
+  "served": 0,
+  "verified_false": 0,
+  "verified_true": 0,
+  "wait_ms": 0
+}

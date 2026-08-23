@@ -1,0 +1,40 @@
+
+---------------------------------------------------------------------
+  fleet complete  ·  mode=baseline  agents=5  ref=e950d31
+---------------------------------------------------------------------
+
+  agent    status             wall
+  a1       ok                 8.7s
+  a2       ok                 8.8s
+  a3       ok                 8.7s
+  a4       ok                 8.7s
+  a5       ok                 8.8s
+
+  total wall clock (fan-out)                     8.8s
+  slowest agent                                  8.8s
+
+  cache log  /tmp/hs-demo-baseline-20260823-154831/log.jsonl
+  scope      this run   (15 of 15 lines)
+
+  commands agents asked for                       15
+    executed  (MISS + PASSTHROUGH)                15
+    served    (HIT + LEASE_WAIT)                   0
+      of which coalesced in flight                 0
+
+  execution-seconds spent                      40.5s
+  execution-seconds DELETED                     0.0s
+  if every agent executed everything           40.5s
+  hit rate                                      0.0%
+
+  agent       hit   exec   wait      deleted
+  a1            0      3      0         0.0s
+  a2            0      3      0         0.0s
+  a3            0      3      0         0.0s
+  a4            0      3      0         0.0s
+  a5            0      3      0         0.0s
+
+---------------------------------------------------------------------
+  agent logs   /private/tmp/fleet-baseline-20260823-154831/logs
+  summary      /private/tmp/fleet-baseline-20260823-154831/summary.txt
+---------------------------------------------------------------------
+
