@@ -27,6 +27,11 @@ type Server struct {
 
 	mu     sync.Mutex
 	leases map[string]*lease
+	// unservable remembers keys that finished and turned out not to be
+	// servable. Blocking a peer on work whose result can never be served
+	// makes it wait and then do the work anyway, which is worse than not
+	// coalescing at all. One wave can pay that; no wave after it should.
+	unservable map[string]bool
 
 	subMu sync.Mutex
 	subs  map[chan []byte]struct{}
@@ -36,10 +41,11 @@ type Server struct {
 
 func NewServer(store *Store) *Server {
 	return &Server{
-		store:  store,
-		leases: map[string]*lease{},
-		subs:   map[chan []byte]struct{}{},
-		start:  time.Now(),
+		store:      store,
+		leases:     map[string]*lease{},
+		unservable: map[string]bool{},
+		subs:       map[chan []byte]struct{}{},
+		start:      time.Now(),
 	}
 }
 
@@ -116,8 +122,9 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 func (s *Server) waitForPeer(key string) (waitedMS int64, rec *Record) {
 	s.mu.Lock()
 	l, held := s.leases[key]
+	known := s.unservable[key]
 	s.mu.Unlock()
-	if !held {
+	if !held || known {
 		return 0, nil
 	}
 	started := time.Now()
@@ -186,6 +193,11 @@ func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.Append(&rec); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if !rec.Servable && rec.Key != "" {
+		s.mu.Lock()
+		s.unservable[rec.Key] = true
+		s.mu.Unlock()
 	}
 	s.release(rec.Key)
 	s.broadcast(map[string]any{"type": "decision", "record": rec})

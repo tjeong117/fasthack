@@ -690,10 +690,15 @@ w("  %-38s %11d" % ("    of which coalesced in flight", waits))
 w("")
 w("  %-38s %10.1fs" % ("execution-seconds spent", executed_ms / 1000.0))
 w("  %-38s %10.1fs" % ("execution-seconds DELETED", served_ms / 1000.0))
+if waits:
+    # Not the time these agents spent blocked: the daemon discards that and
+    # stamps a LEASE_WAIT record with the execution time it deleted instead.
+    # This is the share of the deleted total that the lease earned rather than
+    # the index -- work that no cache could have served because no peer had
+    # finished it yet.
+    w("  %-38s %10.1fs" % ("  of which won by in-flight leases", wait_ms / 1000.0))
 w("  %-38s %10.1fs" % ("if every agent executed everything", counterfactual_ms / 1000.0))
 w("  %-38s %10.1f%%" % ("hit rate", hit_rate))
-if waits:
-    w("  %-38s %10.1fs" % ("time blocked on peer leases", wait_ms / 1000.0))
 if verified_false:
     w("")
     w("  *** %d DIVERGENT served result(s) — investigate before quoting ***" % verified_false)

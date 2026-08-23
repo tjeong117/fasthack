@@ -200,8 +200,12 @@ var classifyCases = []classifyCase{
 	{"python -m pytest", SERVE, "build: python"},
 	{"python3 -c 'import sys;print(sys.version)'", SERVE, "build: python3"},
 	{"node index.js", SERVE, "build: node"},
-	{"pip install -r requirements.txt", SERVE, "build: pip"},
-	{"uv sync", SERVE, "build: uv"},
+	// Installs are never servable (the env fingerprint always moves), and
+	// SERVE would make peers block on a lease and then install anyway.
+	{"pip install -r requirements.txt", RECORD_ONLY, "install:"},
+	{"uv sync", RECORD_ONLY, "install:"},
+	// "uv run X" executes inside the venv rather than changing it.
+	{"uv run pytest", SERVE, "pytest"},
 	{"npm --silent run build", SERVE, "build: npm run"},
 	{"FOO=1 pytest", SERVE, "build: pytest"},
 	{"FOO2=1 pytest", SERVE, "build: pytest"},

@@ -96,7 +96,36 @@ var buildHeads = map[string]bool{
 	"pytest": true, "make": true, "tsc": true, "mypy": true, "ruff": true,
 	"flake8": true, "eslint": true, "jest": true, "vitest": true,
 	"python": true, "python3": true, "node": true,
-	"yarn": true, "pnpm": true, "pip": true, "pip3": true, "uv": true,
+	"yarn": true, "pnpm": true,
+}
+
+// installHeads move the interpreter's packages out from under us. The purity
+// gate always refuses to serve them, because the env fingerprint changes, so
+// SERVE would be a lie that costs real time rather than merely a missed hit:
+// the first agent takes a lease, its peers block for the whole install, the
+// record comes back unservable, and they then install anyway. Four agents wait
+// and then pay, which is strictly worse than letting them run in parallel.
+//
+// RECORD_ONLY keeps them out of the lease path entirely. They flip back to
+// SERVE when the artifact guard exists and can replay the produced directory
+// instead of just the transcript.
+// innerHead returns the command a wrapper like "uv run" is about to execute.
+func innerHead(toks []shellToken, sub string) string {
+	for i, t := range toks {
+		if t.text == sub && i+1 < len(toks) {
+			for _, next := range toks[i+1:] {
+				if strings.HasPrefix(next.text, "-") {
+					continue
+				}
+				return cmdBase(next.text)
+			}
+		}
+	}
+	return ""
+}
+
+var installHeads = map[string]bool{
+	"pip": true, "pip3": true, "uv": true, "poetry": true, "conda": true,
 }
 
 var gitReadSubs = map[string]bool{
@@ -221,6 +250,17 @@ func classifyHead(head string, toks []shellToken) (Policy, string) {
 	}
 	if head == "ls" && longListing(toks[1:]) {
 		return PASSTHROUGH, "ls long format prints mtimes the tree hash does not cover"
+	}
+	if installHeads[head] {
+		// "uv run pytest" and "poetry run pytest" execute inside the venv
+		// rather than changing it, so they are whatever the inner command is.
+		if sub := firstSubcommand(toks); sub == "run" || sub == "tool" {
+			if inner := innerHead(toks, sub); inner != "" {
+				p, reason := classifyHead(inner, toks)
+				return p, head + " " + sub + " -> " + reason
+			}
+		}
+		return RECORD_ONLY, "install: never servable without the artifact guard"
 	}
 	if readHeads[head] {
 		return SERVE, "read: " + head
