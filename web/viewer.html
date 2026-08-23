@@ -215,6 +215,9 @@ button:hover{color:var(--fg);border-color:var(--dim)}
 .row.divergent{background:rgba(255,68,56,.16);border-left-color:var(--warn)}
 .row.divergent .badge{background:var(--warn);border-color:var(--warn);color:#fff;font-weight:700}
 .row.divergent .r-note{color:var(--warn);font-weight:600}
+.row.verify-ok{border-left-color:var(--accent)}
+.row.verify-ok .badge{border-color:var(--accent);color:var(--accent)}
+.row.verify-ok .r-note{color:var(--accent)}
 
 .empty{padding:40px 20px;color:var(--dimmer);font-size:13px}
 
@@ -224,6 +227,9 @@ button:hover{color:var(--fg);border-color:var(--dim)}
   .hero{flex-direction:column;align-items:stretch;gap:22px}
   .row{grid-template-columns:40px 1fr 92px 74px;}
   .r-note{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
 </style>
 </head>
@@ -278,7 +284,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
   </div>
 </section>
 
-<section class="verify" id="verify">
+<section class="verify" id="verify" aria-live="polite">
   <span><b id="v-served">0</b>served</span>
   <span><b id="v-verified">0</b>verified</span>
   <span class="ok" id="v-div-wrap"><b id="v-divergent">0</b>divergent</span>
@@ -412,15 +418,16 @@ button:hover{color:var(--fg);border-color:var(--dim)}
   function freshState() {
     return {
       deletedMs: 0, executedMs: 0,
-      served: 0, executed: 0, waits: 0,
+      served: 0, executed: 0, passthrough: 0, waits: 0,
       verified: 0, divergent: 0, inflight: 0,
-      agents: {}, agentOrder: [], sawStats: false
+      agents: {}, agentOrder: [], recordsByKey: {},
+      reportedAgents: 0, sawStats: false
     };
   }
 
   function agentSlot(id) {
     if (!state.agents[id]) {
-      state.agents[id] = { hit: 0, exec: 0, wait: 0, deletedMs: 0 };
+      state.agents[id] = { hit: 0, exec: 0, pass: 0, wait: 0, deletedMs: 0 };
       state.agentOrder.push(id);
       state.agentOrder.sort();
     }
@@ -474,13 +481,15 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     el.vServed.textContent = state.served;
     el.vVerified.textContent = state.verified;
     el.vDivergent.textContent = state.divergent;
+    var audited = state.verified + state.divergent;
+    var awaiting = Math.max(0, state.served - audited);
     if (state.divergent > 0) {
       el.verify.className = 'verify loud';
       el.vNote.textContent = 'a served result did not match a re-execution — evict and stop quoting the counter';
     } else {
       el.verify.className = 'verify';
-      el.vNote.textContent = state.served > state.verified
-        ? (state.served - state.verified) + ' awaiting shadow re-execution'
+      el.vNote.textContent = awaiting
+        ? awaiting + ' awaiting shadow re-execution'
         : 'served results are re-executed in the background and diffed after normalisation';
     }
 
@@ -500,11 +509,15 @@ button:hover{color:var(--fg);border-color:var(--dim)}
         + '<span class="lane-nums"><span class="h">' + servedN + '</span> served '
         + '<span class="dim">/</span> <span class="e">' + a.exec + '</span> exec</span></div>'
         + '<div class="lane-bar"><i style="width:' + pct.toFixed(1) + '%"></i><u></u></div>'
-        + '<div class="lane-foot">' + durText(a.deletedMs) + ' deleted'
+        + '<div class="lane-foot">' + (servedN ? durText(a.deletedMs) + ' deleted'
+          : a.exec ? 'no reuse yet' : 'outside cache boundary')
         + (a.wait ? '<span class="w"> &middot; ' + a.wait + ' coalesced in flight</span>' : '')
+        + (a.pass ? '<span class="w"> &middot; ' + a.pass + ' passed through</span>' : '')
         + '</div></div>';
     }
-    el.lanes.innerHTML = out || '<div class="lane-foot">no agents yet</div>';
+    el.lanes.innerHTML = out || (state.reportedAgents
+      ? '<div class="lane-foot">aggregate history loaded &middot; per-agent details begin after connection</div>'
+      : '<div class="lane-foot">no agents yet</div>');
   }
 
   // The counter eases toward its target so a big hit is visible as motion
@@ -564,6 +577,29 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     while (el.feed.children.length > FEED_MAX) el.feed.removeChild(el.feed.lastElementChild);
   }
 
+  function pushVerifyRow(v) {
+    var empty = el.feed.querySelector('.empty');
+    if (empty) empty.remove();
+
+    var source = state.recordsByKey[v.key] || {};
+    var row = document.createElement('div');
+    row.className = 'row ' + (v.ok ? 'verify-ok' : 'divergent');
+    var command = source.cmd || (v.key ? v.key.slice(0, 24) + '\u2026' : 'unknown cache key');
+    var provenance = source.source_agent || source.agent || '?';
+    var note = v.ok
+      ? 'matched re-execution \u00b7 source ' + provenance
+      : 'DIVERGENT \u2014 ' + (v.detail || 're-execution differed');
+
+    row.appendChild(cell('r-agent', 'audit'));
+    row.appendChild(cell('r-cmd', command, command + '\n' + (v.key || '')));
+    row.appendChild(cell('badge', v.ok ? 'VERIFIED' : 'DIVERGED'));
+    row.appendChild(cell('r-dur', v.ok ? 'match' : 'mismatch'));
+    row.appendChild(cell('r-note', note, note));
+
+    el.feed.insertBefore(row, el.feed.firstChild);
+    while (el.feed.children.length > FEED_MAX) el.feed.removeChild(el.feed.lastElementChild);
+  }
+
   // ------------------------------------------------------------- ingestion
   // A LEASE_WAIT is a served result, not a third outcome. The daemon returns
   // the peer's result to an agent that blocked rather than duplicating the
@@ -575,16 +611,29 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     var d = r.decision, ms = Number(r.duration_ms) || 0;
     var a = agentSlot(r.agent || '?');
 
+    if (r.key) state.recordsByKey[r.key] = r;
+
     if (d === 'HIT' || d === 'LEASE_WAIT') {
       state.served++; state.deletedMs += ms; a.deletedMs += ms;
       if (d === 'LEASE_WAIT') { state.waits++; a.wait++; } else { a.hit++; }
       if (ms >= BIG_HIT_MS) flashDelta(ms);
-    } else {
+    } else if (d === 'MISS') {
       state.executed++; state.executedMs += ms; a.exec++;
+    } else if (d === 'PASSTHROUGH') {
+      // PASSTHROUGH work still executed. Keep its reason visible without
+      // removing its duration from either execution clock.
+      state.executed++; state.executedMs += ms; a.exec++;
+      state.passthrough++; a.pass++;
     }
-    if (r.verified === false) state.divergent++;
 
     pushRow(r);
+    render();
+  }
+
+  function onVerify(v) {
+    if (v.ok) state.verified++;
+    else state.divergent++;
+    pushVerifyRow(v);
     render();
   }
 
@@ -611,7 +660,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     if (isFinite(s.verified)) state.verified = Math.max(state.verified, s.verified);
     if (isFinite(s.divergent)) state.divergent = Math.max(state.divergent, s.divergent);
     if (isFinite(s.inflight)) state.inflight = s.inflight;
-    if (isFinite(s.agents)) { for (var i = 1; i <= s.agents; i++) agentSlot('a' + i); }
+    if (isFinite(s.agents)) state.reportedAgents = s.agents;
     render();
   }
 
@@ -619,6 +668,7 @@ button:hover{color:var(--fg);border-color:var(--dim)}
     if (!ev || typeof ev !== 'object') return;
     if (ev.type === 'stats') onStats(ev);
     else if (ev.type === 'decision' && ev.record) onDecision(ev.record);
+    else if (ev.type === 'verify' && typeof ev.ok === 'boolean') onVerify(ev);
   }
 
   function handleRaw(text) {
