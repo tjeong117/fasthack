@@ -55,6 +55,12 @@ command -v hindsight >/dev/null 2>&1 || {
 # asked to execute. Reasoning effort is pinned low because the demo prompt
 # names the three commands outright; there is nothing to deliberate about, and
 # the default effort spends about ninety seconds per agent doing so.
+#
+# SC2089/SC2090 are wrong here and an array is not available: this is a command
+# TEMPLATE crossing a process boundary. fleet.sh evals it with the prompt as
+# $1, so the quotes must survive as literal text, and bash cannot export an
+# array to a child process.
+# shellcheck disable=SC2089,SC2090
 if [ "$LIVE" = 1 ] && [ -z "${FLEET_AGENT_CMD:-}" ]; then
 	if command -v codex >/dev/null 2>&1; then
 		FLEET_AGENT_CMD='codex exec --dangerously-bypass-hook-trust --dangerously-bypass-approvals-and-sandbox -c model_reasoning_effort="low" "$1"'
