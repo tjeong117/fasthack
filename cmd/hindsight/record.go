@@ -93,8 +93,11 @@ func cmdRecord(args []string) error {
 			rs.Policy = *policy
 			rec.ReadSet = rs
 		}
-		store, err := hp.OpenStore(hp.Home(ws.Root))
-		if err == nil {
+		// Writing blobs needs a directory, not an index. OpenStore replays the
+		// whole log to build one we never touch here, which is the only cost
+		// in the system that grows without bound with cache size.
+		store := hp.StorePaths(hp.Home(ws.Root))
+		{
 			// Blobs are content-addressed and written with an atomic rename,
 			// so concurrent agents writing identical output is safe.
 			if id, err := store.PutBlob(res.Stdout); err == nil {

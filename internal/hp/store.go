@@ -122,6 +122,10 @@ func (p Paths) BlobPath(id string) string {
 
 func (p Paths) LogPath() string { return filepath.Join(p.dir, "log.jsonl") }
 
+// GetBlob reads a blob without needing an index, for the same reason PutBlob
+// does not: reading content-addressed bytes is a path lookup.
+func (p Paths) GetBlob(id string) ([]byte, error) { return os.ReadFile(p.BlobPath(id)) }
+
 // Store is an append-only JSONL log plus content-addressed blobs, with an
 // in-memory index rebuilt by scanning the log at startup.
 //
@@ -274,10 +278,19 @@ func (s *Store) Evict(key string) {
 }
 
 // PutBlob content-addresses a byte slice and returns "sha256:<hex>".
-func (s *Store) PutBlob(b []byte) (string, error) {
+// PutBlob on Paths writes a blob without needing a Store.
+//
+// `hindsight record` used to call OpenStore on every miss purely to write two
+// blobs, which replays the entire log to rebuild an index it then never
+// touches. That cost 59ms at ten thousand records and 616ms at a hundred
+// thousand — the only cost in the system that grows without bound, and it was
+// being paid on the hot path of every cache miss.
+//
+// Writing a blob needs a directory and a hash, nothing more.
+func (p Paths) PutBlob(b []byte) (string, error) {
 	sum := sha256.Sum256(b)
 	id := hex.EncodeToString(sum[:])
-	path := s.BlobPath("sha256:" + id)
+	path := p.BlobPath("sha256:" + id)
 	if _, err := os.Stat(path); err == nil {
 		return "sha256:" + id, nil
 	}

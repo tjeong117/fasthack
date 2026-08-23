@@ -55,10 +55,9 @@ func cmdVerify(args []string) error {
 		return err
 	}
 
-	store, err := hp.OpenStore(hp.Home(ws.Root))
-	if err != nil {
-		return err
-	}
+	// Only blob reads are needed here, and those are a path lookup. Opening
+	// the store would replay the whole log to build an index we never touch.
+	store := hp.StorePaths(hp.Home(ws.Root))
 	home, _ := os.UserHomeDir()
 
 	var checked, agreed, diverged, skipped int
