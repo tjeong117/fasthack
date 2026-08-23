@@ -3,6 +3,7 @@ package hp
 import (
 	"path"
 	"strings"
+	"unicode"
 )
 
 // Policy is the frozen three-value classification from AGENTS.md.
@@ -518,10 +519,23 @@ func tokenizeSegment(seg string) (toks []shellToken, redirect bool, ok bool) {
 			}
 		case '>':
 			flush()
-			redirect = true
 			if i+1 < len(rs) && rs[i+1] == '>' {
 				i++
 			}
+			// ">&N" and ">&-" duplicate or close a file descriptor. They write
+			// no file and mutate nothing, so they are not a redirection in the
+			// sense that matters here. This is worth special-casing because
+			// "2>&1" is a very common idiom on exactly the expensive commands
+			// most worth caching, and treating it as a mutation would cost
+			// real hits for no safety.
+			//
+			// Note "&>file" is unaffected: it is a genuine write, and the '&'
+			// there precedes the '>' rather than following it.
+			if i+2 < len(rs) && rs[i+1] == '&' && (unicode.IsDigit(rs[i+2]) || rs[i+2] == '-') {
+				i += 2
+				continue
+			}
+			redirect = true
 		case '<':
 			flush()
 		default:

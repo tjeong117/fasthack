@@ -113,7 +113,14 @@ var classifyCases = []classifyCase{
 	{"echo hi > out.txt", RECORD_ONLY, "mutation: output redirection"},
 	{"echo hi >> log.txt", RECORD_ONLY, "mutation: output redirection"},
 	{"pytest -q > report.txt", RECORD_ONLY, "mutation: output redirection"},
-	{"go test ./... 2>&1", RECORD_ONLY, "mutation: output redirection"},
+	// ">&N" dups a descriptor rather than writing a file, so it stays
+	// serveable. This idiom is common on exactly the expensive commands worth
+	// caching, and treating it as a mutation would cost hits for no safety.
+	{"go test ./... 2>&1", SERVE, "build: go test"},
+	{"pytest -q 2>&1", SERVE, "build: pytest"},
+	{"echo hi >&2", SERVE, "read: echo"},
+	// "&>file" is a genuine write; the '&' precedes the '>'.
+	{"make &> all.log", RECORD_ONLY, "mutation: output redirection"},
 	// Strictness still wins over the redirect: this one may never be recorded.
 	{"curl https://x > out.txt", PASSTHROUGH, "non-hermetic: curl"},
 
