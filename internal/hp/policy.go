@@ -171,8 +171,23 @@ func Classify(cmd string) (Policy, string) {
 	worst := SERVE
 	reason := ""
 	segments := 0
+	navOnly := 0
 	for _, seg := range splitSegments(cmd) {
 		if strings.TrimSpace(seg.text) == "" {
+			continue
+		}
+		// A leading `cd` is by far the most common thing standing between us
+		// and a cacheable command — 37% of commands in the measured corpus
+		// open with one — and it contributes nothing to the output.
+		//
+		// It is safe to ignore *inside a chain* because the whole command
+		// string, `cd` included, is part of the key: `cd a && pytest` and
+		// `cd b && pytest` are different commands and get different keys. It
+		// is not safe on its own, because there the directory change is the
+		// entire effect, and serving a recorded no-op would silently swallow
+		// it. So it is skipped as a prefix and never servable alone.
+		if isDirectoryChange(seg) {
+			navOnly++
 			continue
 		}
 		segments++
@@ -182,12 +197,40 @@ func Classify(cmd string) (Policy, string) {
 		}
 	}
 	if segments == 0 {
+		if navOnly > 0 {
+			return PASSTHROUGH, "directory change only: the effect is the move, not the output"
+		}
 		return PASSTHROUGH, "empty command"
 	}
 	if segments > 1 {
 		return worst, "chain: strictest segment is " + worst.String() + " (" + reason + ")"
 	}
 	return worst, reason
+}
+
+// isDirectoryChange reports whether a segment is nothing but a `cd`.
+//
+// Only a plain `cd <literal>` or bare `cd` qualifies. Anything with a flag, a
+// variable, or more than one argument is left to the normal path, because the
+// point of skipping this is that we know exactly what it does.
+func isDirectoryChange(seg shellSegment) bool {
+	toks, redirect, ok := tokenizeSegment(seg.text)
+	if !ok || redirect {
+		return false
+	}
+	for len(toks) > 0 && isEnvAssignment(toks[0].text) {
+		toks = toks[1:]
+	}
+	if len(toks) == 0 || len(toks) > 2 || cmdBase(toks[0].text) != "cd" {
+		return false
+	}
+	if len(toks) == 2 {
+		arg := toks[1].text
+		if arg == "" || strings.HasPrefix(arg, "-") || strings.ContainsAny(arg, "$`*?[]{}") {
+			return false
+		}
+	}
+	return true
 }
 
 func classifySegment(seg shellSegment) (Policy, string) {

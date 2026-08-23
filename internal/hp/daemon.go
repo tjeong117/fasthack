@@ -152,7 +152,10 @@ func (s *Server) tryScope(req *LookupReq) (*Record, ScopeDecision) {
 		if c.TreeBefore == req.Tree {
 			continue // Tier 0 already had its chance
 		}
-		dec := ScopeMatch(req.RepoRoot, c.TreeBefore, req.Tree, req.Cmd)
+		// Resolve path arguments against the directory the command actually
+		// ran in. ScopeMatch assumes the repo root, which would misread every
+		// command issued from a subdirectory.
+		dec := ScopeMatchAt(req.RepoRoot, req.CwdRel, c.TreeBefore, req.Tree, req.Cmd)
 		if dec.Promoted {
 			return c, dec
 		}

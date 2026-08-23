@@ -16,7 +16,17 @@ import (
 // key changes meaning, including the set of paths excluded from the tree hash.
 const KeyVersion = "hs-v1"
 
+// gitTimeout bounds an ordinary warm hash. A cold `git add -A` on a very large
+// repository legitimately takes far longer — measured at 13.5s on 108k files —
+// so the first attempt gets coldGitTimeout instead. Killing git mid-write is
+// not a harmless timeout: it leaves a lock behind that nothing else clears.
 const gitTimeout = 10 * time.Second
+const coldGitTimeout = 120 * time.Second
+
+// staleLockAge is how long an index lock must sit untouched before we treat it
+// as debris rather than as a peer mid-write. Comfortably longer than any real
+// `git add -A`, including the cold 108k-file case.
+const staleLockAge = 5 * time.Minute
 
 // envAllow is an allowlist, never the whole environment. Hashing the whole
 // environment drives cross-agent sharing to zero, because harnesses inject
@@ -71,9 +81,21 @@ func NewWorkspace(cwd string) (*Workspace, error) {
 // Note this deliberately cannot see gitignored files. That hole is exactly
 // what EnvFingerprint covers.
 func (w *Workspace) TreeHash() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
-	defer cancel()
 	env := append(os.Environ(), "GIT_INDEX_FILE="+w.IndexPath)
+
+	// A lock left by a killed git is debris, not contention: no process will
+	// ever release it, so every future hash in this worktree fails and the
+	// cache is permanently dead here. Clear it before trying.
+	w.clearStaleIndexLock()
+
+	// The first hash in a worktree builds the index from nothing and can
+	// legitimately take a minute on a large repo. Every later one is warm.
+	timeout := gitTimeout
+	if _, err := os.Stat(w.IndexPath); err != nil {
+		timeout = coldGitTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
 	// Each agent normally has its own worktree and therefore its own git dir
 	// and its own side index. But two hooks can still fire concurrently in one
@@ -86,6 +108,9 @@ func (w *Workspace) TreeHash() (string, error) {
 			break
 		}
 		if ctx.Err() != nil {
+			// We are about to abandon a git that may be mid-write. Leaving its
+			// lock would wedge this worktree for good.
+			w.clearStaleIndexLock()
 			return "", err
 		}
 		time.Sleep(time.Duration(20*(attempt+1)) * time.Millisecond)
@@ -94,6 +119,27 @@ func (w *Workspace) TreeHash() (string, error) {
 		return "", err
 	}
 	return git(ctx, w.Root, env, "write-tree")
+}
+
+// clearStaleIndexLock removes an index lock old enough that no live git could
+// still own it.
+//
+// Age is the only signal available: the lock carries no pid, and a worktree
+// can be shared by several hook processes. Erring long is safe — a lock
+// younger than the threshold is left alone and the retry loop handles genuine
+// contention.
+func (w *Workspace) clearStaleIndexLock() {
+	lock := w.IndexPath + ".lock"
+	fi, err := os.Stat(lock)
+	if err != nil {
+		return
+	}
+	if time.Since(fi.ModTime()) < staleLockAge {
+		return
+	}
+	if os.Remove(lock) == nil {
+		Debugf("removed a stale index lock left by a killed git: %s", lock)
+	}
 }
 
 // EnvFingerprint covers what the tree hash structurally cannot: everything

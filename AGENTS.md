@@ -6,7 +6,7 @@ Build order and schedule live in `PLAN.md`. The public writeup lives in `design_
 
 ## Read this first: the hook can break your own session
 
-This repo installs a PreToolUse hook into `.codex/hooks.json` and `.claude/settings.json`. That hook intercepts shell commands **in this repo**, which includes the ones your own agent is running to develop the hook. A bug in it breaks the loop you would use to fix the bug.
+`hindsight init` installs a PreToolUse hook into `.codex/hooks.json` and `.claude/settings.json`. Run it in a *target* repo, not in this one: the hook intercepts shell commands in whatever repo it is installed in, so installing it here would intercept the commands your own agent is running to develop the hook, and a bug in it would break the loop you would use to fix the bug.
 
 The hook therefore exits silently with empty output unless `HP_ENABLE=1` is set. Only `scripts/fleet.sh` sets it. Never export it in a development shell, and never remove the guard.
 
