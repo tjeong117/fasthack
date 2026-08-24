@@ -36,7 +36,7 @@ USAGE
 OPTIONS
   --agents <N>      Agents per arm.                          [5]
   --out <dir>       Where arm outputs and caches go.  [/tmp/hs-bench-<ts>]
-  --port <N>        First of three consecutive daemon ports.  [7860]
+  --port <N>        First of two consecutive daemon ports.    [7860]
   --timeout <secs>  Per-agent wall-clock kill.                [900]
   --keep            Leave caches and worktrees in place.
   -h, --help
@@ -111,7 +111,7 @@ run_arm() {
 	tail -1 "$OUT/$name.log" >/dev/null 2>&1 || true
 }
 
-P1=$PORT; P2=$((PORT + 1)); P3=$((PORT + 2))
+P1=$PORT; P2=$((PORT + 1))
 start_daemon "$P1" "$OUT/cache-baseline"
 start_daemon "$P2" "$OUT/cache-cold"
 
