@@ -1,0 +1,49 @@
+# Express — the Node arm. See scripts/demo-targets/sympy.cmds for the two
+# rules every command here has to satisfy.
+#
+# All three leave the tree byte-identical. Express gitignores node_modules,
+# coverage/ and .nyc_output, so the ordinary test paths write nothing git can
+# see, and the env fingerprint is unmoved because none of them touch
+# node_modules. Measured before and after: tree 4a68f512..., env-fp f7c9b32d...
+# for all three.
+#
+# Two commands, not three, and both of the obvious candidates for a third were
+# measured and rejected:
+#
+# `npm run lint` straddles the floor. Standalone it took 754 ms; inside the
+# probe, with the filesystem warm, 495 ms. A command that lands on either side
+# of 500 ms depending on the weather is the exact failure the floor check
+# exists to catch — it would be served on the rehearsal and silently
+# unservable on stage.
+#
+# `npm run test-cov` and `npm run test-ci` are slow enough, but nyc writes
+# coverage/ and .nyc_output/, both gitignored, so the tree hash cannot see
+# them and neither can the Node fingerprint, which only reads the lockfile and
+# node_modules. They would be SERVED, and they should not be: the transcript
+# replays and the coverage report does not. That gap is real and belongs in
+# ISSUES_FOR_TOM.md, not in a demo that claims the gate catches everything.
+
+# KNOWN, MEASURED: shadow verification intermittently reports a divergence on
+# this target, and after investigation it is REAL in the bytes and harmless in
+# meaning. mocha's spec reporter annotates a test with its duration only when
+# the test exceeds the "slow" threshold, so which tests carry an annotation
+# depends on machine load:
+#
+#   -   ✔ should not stack overflow with many registered routes
+#   +   ✔ should not stack overflow with many registered routes (76ms)
+#
+# One run printed a duration and the other printed none. Normalization erases
+# durations; it cannot invent one that was never printed. So this is not the
+# known cross-worktree path defect (this output contains no absolute paths at
+# all — checked) and not the whole-millisecond gap in norm.go (fixed, and five
+# concurrent worktrees now agree 4/4 after normalization).
+#
+# It is worth having rather than hiding. The purity gate measures STATE, and
+# this command is genuinely pure by state — the tree and the fingerprint do not
+# move. What moves is the transcript, and no amount of state hashing can see
+# that. Catching it is exactly what shadow verification is for.
+
+#expect:served
+npm test
+#expect:served
+npm run test-tap

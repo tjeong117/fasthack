@@ -21,6 +21,18 @@ if [ -z "$SCRIPT" ] || [ ! -r "$SCRIPT" ]; then
 	exit 2
 fi
 
+# A worktree is a checkout of TRACKED files only, so anything gitignored that
+# the target needs at runtime is missing — node_modules being the case that
+# forced this. The prep runs before the first command, so its effect is
+# included in the tree hash and the fingerprint that key the very first
+# lookup, and it is never itself measured.
+if [ -n "${HS_WORKTREE_PREP:-}" ]; then
+	eval "$HS_WORKTREE_PREP" || {
+		echo "replay-agent: worktree prep failed: $HS_WORKTREE_PREP" >&2
+		exit 2
+	}
+fi
+
 payload() {
 	python3 -c 'import json,sys; print(json.dumps({
         "tool_name":"Bash","tool_input":{"command":sys.argv[1]},

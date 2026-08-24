@@ -61,9 +61,26 @@ func TestNormalize(t *testing.T) {
 			want: "{{DUR}} {{DUR}} {{DUR}} {{DUR}} {{DUR}}",
 		},
 		{
+			// mocha's shape. Whole-number durations used to survive
+			// normalization and made every express run report a divergence
+			// that was not one.
+			name: "whole-number durations",
+			in:   "(52ms) (1s) 250 ms 3 seconds 90 sec",
+			want: "({{DUR}}) ({{DUR}}) {{DUR}} {{DUR}} {{DUR}}",
+		},
+		{
 			name: "version numbers are not durations",
 			in:   "python 3.12.1 and ruff 0.4.2",
 			want: "python 3.12.1 and ruff 0.4.2",
+		},
+		{
+			// A digit needs a unit attached to read as a duration. Without
+			// this, making the fraction optional would swallow ordinary
+			// counts, and a served result that differed in a count would
+			// verify clean.
+			name: "bare counts are not durations",
+			in:   "1260 passing, 3 pending, 0 failing",
+			want: "1260 passing, 3 pending, 0 failing",
 		},
 		{
 			name: "pids",
@@ -252,6 +269,37 @@ func TestNormalizeCrossWorktreeRelativeOutputIsUnaffected(t *testing.T) {
 		"109 passed, 1 deselected, 2 xfailed in 1.81s\n")
 	if !bytes.Equal(Normalize(out, verifier, ""), Normalize(out, producer, "")) {
 		t.Error("output with no absolute paths must normalize identically under any root")
+	}
+}
+
+// mochaSpecTail is the shape that made the Node target unquotable: mocha's
+// spec reporter annotates any test slower than its threshold with a
+// whole-millisecond duration, and that number moves by a millisecond or two
+// between two perfectly correct runs.
+//
+// This output contains no absolute paths, so the cross-worktree root defect
+// above cannot explain it — the duration was the entire divergence. Taken from
+// two back-to-back `npm test` runs in ~/src/express-hs.
+func mochaSpecTail(inflate, mix string) []byte {
+	return []byte("      ✔ should not mix requests (" + mix + ")\n" +
+		"      ✔ should not error when inflating (" + inflate + ")\n\n" +
+		"  1260 passing (1s)\n")
+}
+
+func TestNormalizeWholeMillisecondDurations(t *testing.T) {
+	a := mochaSpecTail("102ms", "52ms")
+	b := mochaSpecTail("101ms", "51ms")
+	if bytes.Equal(a, b) {
+		t.Fatal("fixture is wrong: the two runs should differ before normalization")
+	}
+	if got, want := Normalize(a, "", ""), Normalize(b, "", ""); !bytes.Equal(got, want) {
+		t.Errorf("two correct runs differing only in whole-millisecond durations "+
+			"must normalize identically\n got %q\nwant %q", got, want)
+	}
+	// And the counts either side of the durations must survive, or this stops
+	// being a normalizer and starts being a shredder.
+	if !bytes.Contains(Normalize(a, "", ""), []byte("1260 passing")) {
+		t.Error("the passing count must not be normalized away")
 	}
 }
 

@@ -10,8 +10,19 @@ import (
 var (
 	normTmpRe  = regexp.MustCompile(`/var/folders/[^\s"':,)]+|/tmp/[A-Za-z0-9._\-]*[0-9A-Za-z]{6,}[^\s"':,)]*`)
 	normAddrRe = regexp.MustCompile(`0x[0-9a-f]{6,16}`)
-	normDurRe  = regexp.MustCompile(`\b\d+\.\d+\s?(s|ms|sec|seconds)\b`)
-	normPidRe  = regexp.MustCompile(`(?i)\bpid[= ]\d+`)
+	// The fractional part is optional because plenty of runners print whole
+	// numbers. pytest writes "2.79s" and was the only shape this had to handle
+	// while the demo was Python-only; mocha writes "(52ms)" and "(1s)", and
+	// those survived normalization and reported a divergence on every single
+	// express run. Measured: two correct back-to-back runs of `npm test`
+	// differed, after normalization, in exactly two lines — "(52ms)" against
+	// "(51ms)" and "(102ms)" against "(101ms)".
+	//
+	// Requiring the digits to be followed by a unit is what keeps this off
+	// version numbers: "3.12.1" has no unit and "0.4.2" has no unit, so
+	// neither matches, and TestNormalize pins that.
+	normDurRe = regexp.MustCompile(`\b\d+(\.\d+)?\s?(s|ms|sec|seconds)\b`)
+	normPidRe = regexp.MustCompile(`(?i)\bpid[= ]\d+`)
 )
 
 // Normalize scrubs the parts of command output that legitimately differ
