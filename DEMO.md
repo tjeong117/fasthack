@@ -8,6 +8,97 @@ Everything here has been **run end to end on Arnav's machine**. The numbers belo
 
 ---
 
+## 0. Run of show — lead with the mechanism, not the table
+
+One command. Takes about 17 seconds.
+
+```bash
+export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
+source ~/src/sympy/.venv/bin/activate
+bash scripts/demo-live.sh --agents 5 --port 7831
+```
+
+The table in §1 is the *claim*. This is the claim being earned on screen. `demo-live.sh`
+prints the configuration up front — how many agents, the exact commands each will run, the
+worktree paths, the daemon, and that the cache is fresh — then streams one line per decision
+as the hook makes it, with a running total of deleted execution-seconds:
+
+```
+  agt  decision  command                                      effect        peer        Σ deleted
+────────────────────────────────────────────────────────────────────────────────────────────────
+  a1   EXECUTED  python -m pytest -q -…ore/tests/test_expr.py ran   3.00s   recorded       0.0s
+  a2   WAIT      python -m pytest -q -…ore/tests/test_expr.py saved 3.00s   onto a1        3.0s
+
+    ┌ why that replay was legal ────────────────────────────────────────────────────
+    │ key   hs-v1:4b6b3fc0809ce105ce5ea75cd5a7b75653ce75cb…
+    │ tree  89b863fc1ff5…   env  c44ee644caeb…   cwd  .
+    │ cmd   python -m pytest -q -p no:cacheprovider sympy/core/tests/test_expr.py
+    │ identical tree + identical environment + identical command  →  replay, not prediction
+    └──────────────────────────────────────────────────────────────────────────────
+
+  a5   WAIT      python -m pytest -q -…ore/tests/test_expr.py saved 3.00s   onto a1        6.0s
+  a1   EXECUTED  python -m pytest -q -…ore/tests/test_arit.py ran   3.01s   recorded      12.0s
+  …
+  a2   WAIT      python -m pytest -q -…/tests/test_numbers.py saved 1.69s   onto a1       30.8s
+```
+
+Two things on that screen answer the "trust me bro" objection directly. The **key block**
+prints the tree hash, environment fingerprint, cwd and command behind the first avoided
+execution, so the audience sees a mechanical match rather than a model deciding two things
+looked similar enough. And the **Σ deleted** column climbs in front of them rather than
+appearing as a single number at the end.
+
+The closing block states the reason in words:
+
+```
+  commands demanded                            15
+    executed                                    3  distinct (command, tree, environment) states
+    served without executing                   12
+      of which coalesced in flight             12  blocked on a peer already running it
+
+  execution-seconds  before                 38.4s  if every agent executed everything
+  execution-seconds  after                   7.7s
+  execution-seconds deleted                 30.8s  (80% deleted)
+
+  fleet wall clock                          10.4s
+  Wall clock is reported, never claimed: at this scale the bottleneck is agent
+  latency, so deleted execution-seconds do not all become elapsed time.
+```
+
+Every line on screen is read back out of the daemon's own `log.jsonl` *after* the decision,
+never inferred from what the script just did — so the screen and the evidence file in
+`demo-runs/live-<stamp>/` are the same artefact and cannot drift apart.
+
+`--mode baseline` runs the control arm, where the hook records everything and is forbidden
+to serve any of it.
+
+### An injected bug is available but not yet wired into this run
+
+`~/src/sympy` has a branch `hindsight-demo-bug` (commit `54bfba2`) carrying a real,
+deterministic regression: in `sympy/core/mod.py`, `Mod(p, 2)` returns `S.One` for even `p`
+and `S.Zero` for odd `p` — the two return values are swapped. It fails exactly one test with
+a legible message and leaves the other two demo commands green:
+
+```
+        # symbolic with known parity
+        n = Symbol('n', even=True)
+>       assert Mod(n, 2) == 0
+E       assert 1 == 0
+E        +  where 1 = Mod(n, 2)
+FAILED sympy/core/tests/test_arit.py::test_Mod - assert 1 == 0
+1 failed, 100 passed, 2 xfailed
+```
+
+It was chosen for **convergence**: the only fix that satisfies the test is swapping the two
+constants back, which returns the worktree to git tree `89b863fc…` — byte-identical to
+`master`. Agents that converge on an identical tree share every downstream cache entry, which
+is what would produce round-two hits *after* the fix. Run the fan-out against it with
+`--ref hindsight-demo-bug`. The fix-and-re-test phase is **not** scripted yet, so today this
+only shows a failing test being replayed faithfully (exit code included), not the round-two
+story. Do not claim round-two sharing from this run.
+
+---
+
 ## 1. The measured result — our demo number
 
 Five agents, five git worktrees of **SymPy**, launched simultaneously, each running the same three test commands. Both arms run the hook and record identically; **the only variable is whether hits are served.** Each arm gets a *fresh* cache, so the cached arm earns every hit from its own peers.
