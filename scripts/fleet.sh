@@ -638,6 +638,14 @@ LOG_PATH="$(resolve_log || true)"
 # afterwards is why the first real fan-out reported "verified 0" while serving
 # 29 results: the mechanism was built and never fired.
 if [ "$MODE" = "cached" ] && [ "$VERIFY" = 1 ] && [ ${#WORKTREES[@]} -gt 0 ]; then
+	# Register the verification worktree with cleanup out here, before the
+	# block below, because that block is a pipeline: `{ ... } | tee` runs in a
+	# subshell and an array append inside it never reaches the parent. Cleanup
+	# therefore never learned this worktree existed, and every cached run
+	# stranded a ~50 MB checkout plus a stale entry in the target repo's
+	# `git worktree list`. Cleanup skips paths that do not exist, so
+	# registering it before it is created is safe.
+	WORKTREES[${#WORKTREES[@]}]="$OUT/verify"
 	{
 		printf '\n  shadow verification\n'
 		# Verify in a pristine worktree at the starting revision, not in an
@@ -647,9 +655,7 @@ if [ "$MODE" = "cached" ] && [ "$VERIFY" = 1 ] && [ ${#WORKTREES[@]} -gt 0 ]; th
 		# checking are the ones all the agents shared before they diverged,
 		# and this is where those still exist.
 		verify_wt="$OUT/verify"
-		if git -C "$REPO_TOP" worktree add --detach "$verify_wt" "$REF" >/dev/null 2>&1; then
-			WORKTREES[${#WORKTREES[@]}]="$verify_wt"
-		else
+		if ! git -C "$REPO_TOP" worktree add --detach "$verify_wt" "$REF" >/dev/null 2>&1; then
 			verify_wt="${WORKTREES[0]}"
 			printf '  (could not create a pristine worktree; verifying in %s)\n' "$verify_wt"
 		fi
