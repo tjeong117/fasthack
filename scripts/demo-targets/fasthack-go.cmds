@@ -1,0 +1,27 @@
+# Hindsight's own Go suite. Two commands, one flag apart, and the cache serves
+# one and refuses the other. That contrast is the entire point of this target.
+#
+#   go test -count=1 ./...                      tree unchanged  -> SERVED
+#   go test -count=1 -coverprofile=cover.out    writes cover.out -> REFUSED
+#
+# Measured: 7499 ms for the coverprofile run, so it is nowhere near the
+# duration floor — the refusal is purely the purity gate. Before the command
+# the tree hashes to e04056a1..., after it 34bd1c7f..., because cover.out
+# lands in the worktree and this repo does not gitignore it. Nobody declared
+# `-coverprofile` impure and no list of bad flags is consulted. The gate hashed
+# the tree twice and the two hashes disagreed.
+#
+# Deleting cover.out restores the tree to e04056a1..., which is the other half
+# of the claim: the gate is measuring the tree, not remembering a grudge.
+#
+# `go vet ./...` (223 ms) and `go build ./...` (370 ms) were both measured and
+# both rejected — under the 500 ms floor with Go's build cache warm, which is
+# the normal state on a developer machine.
+#
+# The impure command is deliberately LAST. It leaves cover.out behind, which
+# changes the tree every later command would be keyed against.
+
+#expect:served
+go test -count=1 ./...
+#expect:refused
+go test -count=1 -coverprofile=cover.out ./...
